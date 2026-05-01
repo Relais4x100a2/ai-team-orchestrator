@@ -3,7 +3,8 @@
  * AI Team Orchestrator — Cerveau de l'équipe de dev IA
  * ============================================================
  *
- * Ce script orchestre les différents agents (PM, architecte, dev, QA, red team)
+ * Ce script orchestre les agents du pipeline (PM, architecte, dev, QA, red team)
+ * et des rôles additionnels à la demande (voir AGENT_CONFIG).
  * via le Cursor SDK. Chaque agent est un subagent avec son propre prompt système
  * et potentiellement son propre modèle.
  *
@@ -136,6 +137,42 @@ const AGENT_CONFIG = {
     promptFile: "red-team",
     model: process.env.MODEL_STRONG || "gpt-5-mini",
     description: "Red Team — audit de sécurité",
+  },
+
+  devops: {
+    promptFile: "devops-platform",
+    model: process.env.MODEL_STRONG || "gpt-5-mini",
+    description: "DevOps / Plateforme — CI/CD & infra",
+  },
+
+  sre: {
+    promptFile: "sre-observability",
+    model: process.env.MODEL_STRONG || "gpt-5-mini",
+    description: "SRE / Observabilité — logs, métriques, alertes",
+  },
+
+  release: {
+    promptFile: "release-manager",
+    model: process.env.MODEL_FAST || "composer-2",
+    description: "Release — versioning & changelog",
+  },
+
+  ui: {
+    promptFile: "ui-designer",
+    model: process.env.MODEL_FAST || "composer-2",
+    description: "UI Designer — design visuel & tokens",
+  },
+
+  techwriter: {
+    promptFile: "technical-writer",
+    model: process.env.MODEL_FAST || "composer-2",
+    description: "Rédaction technique — guides & doc utilisateur",
+  },
+
+  privacy: {
+    promptFile: "privacy-by-design",
+    model: process.env.MODEL_STRONG || "gpt-5-mini",
+    description: "Privacy by design — données & conformité produit",
   },
 } as const;
 

@@ -2,8 +2,10 @@
 
 Orchestrateur d'équipe de développement IA basé sur le [Cursor SDK](https://cursor.com/docs/sdk/typescript).
 
-Transforme une idée en code déployé, en passant par 5 agents spécialisés :
+Transforme une idée en code déployé via le pipeline par défaut (**5 étapes**) :
 **PM → Architecte → Dev → QA → Red Team**.
+
+D’**autres agents** (UX, UI, DevOps, SRE, release, rédaction technique, privacy) sont disponibles **à la demande** (`npm run agent:<rôle>`) ; ils ne font pas partie du pipeline `full` pour limiter la durée des runs et éviter les régressions de flux.
 
 ## 🏗️ Architecture
 
@@ -13,11 +15,15 @@ Toi (super-superviseur)
   ▼
 Cursor SDK (orchestrateur TypeScript)
   │
-  ├── 📋 PM Agent         → Specs & user stories
-  ├── 🏛️ Architect Agent   → Modèle de données & architecture
-  ├── 💻 Dev Agent         → Implémentation (PR auto)
-  ├── 🧪 QA Agent          → Review & tests
-  └── 🔴 Red Team Agent    → Audit sécurité
+  ├── Pipeline full (séquentiel + boucles QA / Red Team)
+  │   ├── 📋 PM → 🏛️ Architect → 💻 Dev ⇄ 🧪 QA ⇄ 🔴 Red Team
+  │
+  └── Agents à la demande (même injection `projects/*.md`)
+      ├── 🎨 UX / UI — parcours & wireframes ; présentation visuelle
+      ├── ⚙️ DevOps / SRE — CI/CD, Docker, observabilité
+      ├── 📦 Release — versioning & changelog
+      ├── ✍️ Tech writer — guides utilisateur & doc publique
+      └── 🔒 Privacy — privacy by design (produit & données)
   │
   ▼
 GitHub (Issues, PRs, Actions)
@@ -65,9 +71,15 @@ ai-team-orchestrator/
 │       ├── product-manager.md
 │       ├── data-architect.md
 │       ├── ux-designer.md
+│       ├── ui-designer.md
 │       ├── fullstack-dev.md
 │       ├── qa-engineer.md
-│       └── red-team.md
+│       ├── red-team.md
+│       ├── devops-platform.md
+│       ├── sre-observability.md
+│       ├── release-manager.md
+│       ├── technical-writer.md
+│       └── privacy-by-design.md
 ├── projects/                 # 📂 Contexte spécifique par projet
 │   ├── dataset-style.md      # Exemple : Python + Streamlit + CapRover
 │   └── _template.md          # Template vide pour nouveau projet
@@ -138,6 +150,7 @@ npm run agent:pm "Je veux un dashboard de statistiques"
 npm run project:dataset-style -- --role pm "Je veux un dashboard de statistiques"
 
 # Autres agents
+npm run agent:ux "Esquisse les parcours pour l’upload CSV"
 npm run project:dataset-style -- --role architect "Conçois le schéma BDD"
 npm run project:dataset-style -- --role dev "Implémente la page"
 npm run project:dataset-style -- --role qa "Review la PR #12"
@@ -169,6 +182,32 @@ Le pipeline inclut une **boucle de feedback** :
 
 Le pipeline s'arrête à chaque **checkpoint** pour ta validation
 (via les hooks Cursor).
+
+### Agents hors pipeline (`npm run agent:*`)
+
+Les rôles **`ux`**, **`ui`**, **`devops`**, **`sre`**, **`release`**, **`techwriter`**, **`privacy`** se lancent comme les autres (`npm run agent:devops "…"`, etc., ou `--role <clé>` après `--project …`). Ils ne sont **pas** enchaînés automatiquement après `fullPipeline`.
+
+## 🔐 Chaîne assurance (DevOps / SRE / doc)
+
+Le flux **full** ne couvre pas automatiquement les **artefacts CI/CD, Docker ou observabilité** produits par les agents DevOps ou SRE. **Avant de merger** sur le dépôt cible tout changement issu ou suggéré par ces agents, prévoir au moins une des mesures suivantes (cumulables) :
+
+| Action | Détail |
+|--------|--------|
+| **Revue avec critères sécu** | Un humain vérifie le diff sous `.github/workflows/`, `Dockerfile*`, Compose, manifests K8s/Helm, règles d’alerte / exporters. |
+| **Red Team ciblé** | Tâche dédiée sur le diff **infra / CI / config déploiement** (ne remplace pas la revue humaine sur environnements sensibles). |
+| **Protections de branches** | Review obligatoire + CI verte sur les PR qui touchent ces chemins (GitHub / GitLab selon le cas). |
+
+**Checklist minimale (workflows & conteneurs)** — à garder en tête lors des revues :
+
+- Préférer **OIDC / identités fédérées** aux secrets long-lived quand la plateforme le permet ; permissions **minimales** (`GITHUB_TOKEN`, rôles cloud).
+- **`permissions:`** aussi restreints que nécessaire ; éviter les motifs risqués non maîtrisés (`pull_request_target` depuis forks, exécution non éprouvée avec secrets).
+- **Épinglage** des actions tierces (SHA de commit) ou versioning verrouillé ; images Docker avec **digest** ou tags explicites, rebuild reproductible.
+- Pas de secrets en clair dans le repo ; exemples de doc avec **placeholders** clairement fictifs (voir aussi l’agent rédaction technique).
+- **Dockerfile** : utilisateur non-root lorsque pertinent, pas de données sensibles en layer, `HEALTHCHECK` si pertinent.
+
+Pour les mises à jour **README / guides produit**, éviter d’exposer des détails internes inutiles (MCP, stratégie d’infra sensible) hors besoin légitime des contributeurs.
+
+Un futur flag du type **`--pipeline extended`** pourrait ajouter des étapes optionnelles **sans modifier** le comportement du `full` actuel ; ce n’est pas implémenté ici.
 
 ## ✏️ Personnaliser les agents
 
