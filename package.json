@@ -1,0 +1,25 @@
+{
+  "name": "ai-team-orchestrator",
+  "version": "0.1.0",
+  "description": "Orchestrateur d'équipe de dev IA via Cursor SDK",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/orchestrator.ts",
+    "dev": "tsx watch src/orchestrator.ts",
+    "agent:pm": "tsx src/orchestrator.ts --role pm",
+    "agent:architect": "tsx src/orchestrator.ts --role architect",
+    "agent:dev": "tsx src/orchestrator.ts --role dev",
+    "agent:qa": "tsx src/orchestrator.ts --role qa",
+    "agent:redteam": "tsx src/orchestrator.ts --role redteam",
+    "pipeline": "tsx src/orchestrator.ts --pipeline full"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0"
+  }
+}
