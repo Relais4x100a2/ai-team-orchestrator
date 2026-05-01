@@ -1,4 +1,8 @@
-# Contexte projet — Dataset Style
+---
+name: Dataset Style
+repo: https://github.com/Relais4x100a2/dataset_style
+branch: deploy/caprover-relais4
+---
 
 ## Vue d'ensemble
 

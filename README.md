@@ -23,7 +23,7 @@ Cursor SDK (orchestrateur TypeScript)
 GitHub (Issues, PRs, Actions)
   │
   ▼
-CapRover / Hetzner (déploiement)
+Infra & déploiement (CI/CD, hébergement, PaaS — selon `projects/*.md`)
 ```
 
 ## 🚀 Démarrage rapide
@@ -61,26 +61,68 @@ avec prévisualisation, validation des colonnes, et stockage en BDD"
 ai-team-orchestrator/
 ├── src/
 │   ├── orchestrator.ts       # 🧠 Script principal (le cerveau)
-│   └── prompts/              # 🎭 Prompts des agents (le cœur)
+│   └── prompts/              # 🎭 Prompts des agents (génériques)
 │       ├── product-manager.md
 │       ├── data-architect.md
 │       ├── ux-designer.md
 │       ├── fullstack-dev.md
 │       ├── qa-engineer.md
 │       └── red-team.md
+├── projects/                 # 📂 Contexte spécifique par projet
+│   ├── dataset-style.md      # Exemple : Python + Streamlit + CapRover
+│   └── _template.md          # Template vide pour nouveau projet
 ├── .cursor/
 │   ├── mcp.json              # 🔌 Connexions MCP (Figma, GitHub)
 │   ├── hooks.json             # 🛑 Hooks de supervision
-│   └── skills/
-│       └── project-context.md # 📖 Contexte partagé par tous les agents
 ├── .github/
 │   └── workflows/
 │       └── ci.yml             # ⚙️ CI pour l'orchestrateur
 ├── CLAUDE.md                  # 📝 Contexte pour Claude Code
 ├── package.json
 ├── tsconfig.json
+├── backlog.json              # 📋 État du backlog (généré)
 └── .env.example
 ```
+
+## 🎯 Architecture multi-projets
+
+L'orchestrateur est **agnostique** — il peut travailler sur n'importe quelle stack :
+
+- **Python + Streamlit** (dataset_style)
+- **React + Node.js** (autre projet)
+- **Django + PostgreSQL** (autre projet)
+- etc.
+
+Chaque projet a un fichier `projects/<nom>.md` avec frontmatter YAML :
+
+```yaml
+---
+name: Dataset Style
+repo: https://github.com/Relais4x100a2/dataset_style
+branch: deploy/caprover-relais4
+---
+
+## Stack technique
+[Description...]
+
+## Conventions
+[Description...]
+
+## Déploiement
+[Description...]
+```
+
+Au démarrage avec `--project projects/dataset-style.md`, le contexte du projet
+est **injecté automatiquement** dans tous les prompts des agents. Cela rend les agents
+génériques et capables de s'adapter à n'importe quelle stack.
+
+### Ajouter un nouveau projet
+
+1. Copie `projects/_template.md` en `projects/monprojet.md`
+2. Remplis le frontmatter YAML (name, repo, branch)
+3. Ajoute les sections : Stack technique, Conventions, Déploiement, Contraintes
+4. Ajoute un script npm dans `package.json` si voulu
+5. Lance l’outil avec le projet chargé, par ex. : `npm run start -- --project projects/monprojet.md --role pm "…"` (équivalent : `tsx src/orchestrator.ts --project projects/monprojet.md --role pm "…"`)
 
 ## 🎯 Comment ça marche
 
@@ -89,20 +131,17 @@ ai-team-orchestrator/
 Lance un seul agent pour une tâche spécifique :
 
 ```bash
-# Le PM rédige les specs
-npm run agent:pm "Je veux un dashboard de statistiques sur les datasets"
+# Sans projet spécifique (utilise .env)
+npm run agent:pm "Je veux un dashboard de statistiques"
 
-# L'architecte conçoit le modèle de données
-npm run agent:architect "Conçois le schéma BDD pour stocker des datasets CSV"
+# Avec projet spécifique (utilise projects/dataset-style.md)
+npm run project:dataset-style -- --role pm "Je veux un dashboard de statistiques"
 
-# Le dev implémente
-npm run agent:dev "Implémente la page de visualisation des datasets"
-
-# Le QA review
-npm run agent:qa "Review la PR #12"
-
-# La red team audite
-npm run agent:redteam "Audite la sécurité de l'upload de fichiers"
+# Autres agents
+npm run project:dataset-style -- --role architect "Conçois le schéma BDD"
+npm run project:dataset-style -- --role dev "Implémente la page"
+npm run project:dataset-style -- --role qa "Review la PR #12"
+npm run project:dataset-style -- --role redteam "Audite la sécurité"
 ```
 
 ### Mode pipeline complet
@@ -110,8 +149,23 @@ npm run agent:redteam "Audite la sécurité de l'upload de fichiers"
 Lance les 5 agents en séquence, chacun recevant le contexte du précédent :
 
 ```bash
+# Sans projet spécifique
 npm run pipeline "Brief de la fonctionnalité complète"
+
+# Avec projet spécifique (+ injectation du contexte dans chaque agent)
+npm run project:dataset-style -- --pipeline full "Brief de la fonctionnalité"
+
+# Pipeline avec backlog (prend la prochaine issue dans le backlog)
+npm run project:dataset-style -- --pipeline next
 ```
+
+**Mode d’exécution :** les étapes **Product Manager** et **Data Architect** tournent en **local** sur le répertoire courant de l’orchestrateur (`cwd`). À partir du **Développeur**, le pipeline utilise **cloud** Cursor contre le repo cible défini dans le fichier projet ou `.env` (`TARGET_REPO_URL`).
+
+Le pipeline inclut une **boucle de feedback** :
+- QA approuve → continue vers RedTeam
+- QA demande changements → relance Dev, puis re-review (max 3 itérations)
+- RedTeam détecte failles critiques → relance Dev, puis re-audit (max 3 itérations)
+- RedTeam détecte failles mineures → passage avec documentation
 
 Le pipeline s'arrête à chaque **checkpoint** pour ta validation
 (via les hooks Cursor).

@@ -12,14 +12,21 @@
     "agent:dev": "tsx src/orchestrator.ts --role dev",
     "agent:qa": "tsx src/orchestrator.ts --role qa",
     "agent:redteam": "tsx src/orchestrator.ts --role redteam",
-    "pipeline": "tsx src/orchestrator.ts --pipeline full"
+    "pipeline": "tsx src/orchestrator.ts --pipeline full",
+    "pipeline:next": "tsx src/orchestrator.ts --pipeline next",
+    "pm:backlog": "tsx src/orchestrator.ts --pm-backlog",
+    "backlog": "tsx src/orchestrator.ts --backlog",
+    "project:dataset-style": "tsx src/orchestrator.ts --project projects/dataset-style.md"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.0"
+    "@cursor/sdk": "^1.0.0",
+    "dotenv": "^17.4.2",
+    "gray-matter": "^4.0.3"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ripgrep": "^0.3.1",
     "tsx": "^4.19.0",
-    "typescript": "^5.5.0",
-    "@types/node": "^22.0.0"
+    "typescript": "^5.5.0"
   }
 }

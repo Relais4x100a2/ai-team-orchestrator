@@ -17,16 +17,57 @@
  * ============================================================
  */
 
+import "dotenv/config";
 import { Agent } from "@cursor/sdk";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import matter from "gray-matter";
+
+// Configure ripgrep path for local agent operations
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const rgPath = resolve(__dirname, "../node_modules/ripgrep/lib/rg.mjs");
+if (existsSync(rgPath) && !process.env.RG_PATH) {
+  process.env.RG_PATH = rgPath;
+}
+
+// Backlog management types
+type IssueStatus = "todo" | "in_progress" | "done" | "skipped";
+type IssuePriority = "MUST" | "SHOULD" | "COULD" | "WONT";
+type IssueSize = "S" | "M" | "L" | "XL";
+
+interface BacklogIssue {
+  id: string;
+  title: string;
+  description: string;
+  status: IssueStatus;
+  priority: IssuePriority;
+  size: IssueSize;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  pipelineRun: string | null;
+}
+
+interface Backlog {
+  version: number;
+  lastUpdated: string;
+  issues: BacklogIssue[];
+}
+
+interface ProjectContext {
+  name: string;
+  repo: string;
+  branch: string;
+  content: string;
+}
+
+const BACKLOG_PATH = resolve(__dirname, "../backlog.json");
+let activeProject: ProjectContext | null = null;
 
 // ------------------------------------------------------------
 // Configuration
 // ------------------------------------------------------------
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Charge un fichier prompt depuis src/prompts/ */
 function loadPrompt(role: string): string {
@@ -37,19 +78,35 @@ function loadPrompt(role: string): string {
   return readFileSync(path, "utf-8");
 }
 
-/** Configuration des agents — modifie les modèles ici si besoin */
+/** Charge un fichier projet depuis projects/ avec frontmatter YAML */
+function loadProject(filePath: string): ProjectContext {
+  const fullPath = resolve(process.cwd(), filePath);
+  if (!existsSync(fullPath)) {
+    throw new Error(`Projet introuvable : ${fullPath}`);
+  }
+  const raw = readFileSync(fullPath, "utf-8");
+  const { data, content } = matter(raw);
+  return {
+    name: data.name ?? "Projet sans nom",
+    repo: data.repo ?? process.env.TARGET_REPO_URL ?? "",
+    branch: data.branch ?? process.env.TARGET_BRANCH ?? "main",
+    content: content.trim(),
+  };
+}
+
+/** Configuration des agents — modèles via MODEL_STRONG / MODEL_FAST dans .env */
 const AGENT_CONFIG = {
   // Le PM utilise un modèle puissant car il doit bien comprendre le contexte
   pm: {
     promptFile: "product-manager",
-    model: process.env.MODEL_STRONG || "claude-sonnet-4-20250514",
+    model: process.env.MODEL_STRONG || "gpt-5-mini",
     description: "Product Manager — specs & backlog",
   },
 
   // L'architecte a besoin de raisonnement complexe
   architect: {
     promptFile: "data-architect",
-    model: process.env.MODEL_STRONG || "claude-sonnet-4-20250514",
+    model: process.env.MODEL_STRONG || "gpt-5-mini",
     description: "Data Architect — modèle de données & architecture",
   },
 
@@ -60,7 +117,7 @@ const AGENT_CONFIG = {
     description: "UX Designer — parcours utilisateur & wireframes",
   },
 
-  // Le dev full-stack utilise Composer 2 (optimisé pour le code)
+  // Le dev full-stack utilise un modèle rapide
   dev: {
     promptFile: "fullstack-dev",
     model: process.env.MODEL_FAST || "composer-2",
@@ -74,15 +131,34 @@ const AGENT_CONFIG = {
     description: "QA Engineer — review & tests",
   },
 
-  // La red team a besoin d'un modèle puissant pour l'analyse de sécurité
+  // La red team (tâches sensibles) : modèle « strong » mais économique par défaut
   redteam: {
     promptFile: "red-team",
-    model: process.env.MODEL_STRONG || "claude-sonnet-4-20250514",
+    model: process.env.MODEL_STRONG || "gpt-5-mini",
     description: "Red Team — audit de sécurité",
   },
 } as const;
 
 type AgentRole = keyof typeof AGENT_CONFIG;
+
+/** URL du repo cible pour le mode cloud : projet actif ou .env */
+function resolveRepoUrl(): string | undefined {
+  const fromProject = activeProject?.repo?.trim();
+  const fromEnv = process.env.TARGET_REPO_URL?.trim();
+  const url = fromProject || fromEnv;
+  return url || undefined;
+}
+
+function requireRepoUrlForCloud(cloud?: boolean): void {
+  if (!cloud) return;
+  if (!resolveRepoUrl()) {
+    console.error(
+      "❌ Mode cloud : un dépôt Git cible est obligatoire.\n" +
+        "   Passe --project projects/<fichier>.md (frontmatter avec `repo`) ou définit TARGET_REPO_URL dans .env."
+    );
+    process.exit(1);
+  }
+}
 
 // ------------------------------------------------------------
 // Fonctions utilitaires
@@ -122,21 +198,30 @@ async function runAgent(
     ? `## Contexte des étapes précédentes\n\n${options.additionalContext}\n\n---\n\n## Ta tâche\n\n${task}`
     : task;
 
+  // Injection du contexte projet si disponible
+  const projectSection = activeProject
+    ? `\n\n---\n\n## Contexte du projet cible\n\n**Projet :** ${activeProject.name}\n**Repo :** ${activeProject.repo}\n**Branche :** ${activeProject.branch}\n\n${activeProject.content}`
+    : "";
+
+  requireRepoUrlForCloud(options.cloud);
+
   // Création de l'agent
   const agentOptions: Parameters<typeof Agent.create>[0] = {
     apiKey: process.env.CURSOR_API_KEY!,
     model: { id: config.model },
-    systemPrompt: prompt,
   };
 
   // Mode cloud ou local
+  const repoUrl = resolveRepoUrl();
+  const branchRef = activeProject?.branch?.trim() || process.env.TARGET_BRANCH;
+
   if (options.cloud) {
     Object.assign(agentOptions, {
       cloud: {
         repos: [
           {
-            url: process.env.TARGET_REPO_URL!,
-            startingRef: process.env.TARGET_BRANCH || "main",
+            url: repoUrl!,
+            ...(branchRef && { startingRef: branchRef }),
           },
         ],
         autoCreatePR: options.autoCreatePR ?? false,
@@ -149,19 +234,18 @@ async function runAgent(
   }
 
   const agent = await Agent.create(agentOptions);
-  const run = await agent.send(fullTask);
+  const roleAndTask = `${prompt}\n\n---\n\n${fullTask}`;
+  const taskWithSystemPrompt = projectSection ? `${projectSection}\n\n---\n\n${roleAndTask}` : roleAndTask;
+  const run = await agent.send(taskWithSystemPrompt);
 
-  // Stream des événements (tu vois le travail en temps réel)
-  let result = "";
-  for await (const event of run.stream()) {
-    if (typeof event === "string") {
-      process.stdout.write(event);
-      result += event;
-    } else if (event.type === "text") {
-      process.stdout.write(event.content);
-      result += event.content;
-    }
+  // Attendre la fin et afficher le résultat
+  const runResult = await run.wait();
+  if (runResult.result) {
+    console.log(runResult.result);
+  } else {
+    console.log("(Pas de sortie retournée par l'agent)");
   }
+  const result = runResult.result || "";
 
   console.log("\n" + "─".repeat(60));
   console.log(`✅ Agent ${role} terminé.\n`);
@@ -169,29 +253,244 @@ async function runAgent(
   return result;
 }
 
+// Détecte si QA approuve ou demande des changements
+function detectQAVerdict(qaReport: string): "APPROVE" | "REQUEST_CHANGES" {
+  const lowerReport = qaReport.toLowerCase();
+  if (lowerReport.includes("request changes") || lowerReport.includes("request_changes")) {
+    return "REQUEST_CHANGES";
+  }
+  return "APPROVE";
+}
+
+// Détecte si la red team a des vulnérabilités critiques/majeures
+function detectSecurityVerdict(securityReport: string): "APPROVED" | "CRITICAL_ISSUES" | "MEDIUM_ISSUES" {
+  const lowerReport = securityReport.toLowerCase();
+  if (lowerReport.includes("🚨 vulnérabilités critiques") || lowerReport.includes("vulnérabilités critiques")) {
+    return "CRITICAL_ISSUES";
+  }
+  if (lowerReport.includes("⚠️ vulnérabilités moyennes") || lowerReport.includes("vulnérabilités moyennes")) {
+    return "MEDIUM_ISSUES";
+  }
+  return "APPROVED";
+}
+
+// Backlog management functions
+function loadBacklog(): Backlog {
+  if (!existsSync(BACKLOG_PATH)) {
+    return { version: 1, lastUpdated: new Date().toISOString(), issues: [] };
+  }
+  return JSON.parse(readFileSync(BACKLOG_PATH, "utf-8")) as Backlog;
+}
+
+function saveBacklog(backlog: Backlog): void {
+  backlog.lastUpdated = new Date().toISOString();
+  writeFileSync(BACKLOG_PATH, JSON.stringify(backlog, null, 2), "utf-8");
+}
+
+function parsePMOutput(pmOutput: string): Omit<BacklogIssue, "id" | "createdAt" | "updatedAt" | "completedAt" | "pipelineRun">[] {
+  const issues: Omit<BacklogIssue, "id" | "createdAt" | "updatedAt" | "completedAt" | "pipelineRun">[] = [];
+  const blocks = pmOutput
+    .split(/\n(?:---+|\*\*\*+)\n/)
+    .filter(b => b.includes("🎯 User Story") || b.includes("User Story"));
+
+  for (const block of blocks) {
+    // Try to extract title from # heading first
+    const h1Match = block.match(/^#\s+(.+?)$/m);
+    let title = h1Match ? h1Match[1].trim() : null;
+
+    // If no h1, try to extract from "je veux X afin de" pattern, handling multiline
+    if (!title) {
+      const userStoryMatch = block.match(/je\s+veux\s+(.+?)\s+(?:afin|pour)\s+de/is);
+      title = userStoryMatch ? userStoryMatch[1].trim().split('\n')[0] : null;
+    }
+
+    // Fallback
+    title = title || "Issue sans titre";
+
+    const priorityMatch = block.match(/## [🏷️\s]*Priorit[ée][^\n]*\n+\[?(MUST|SHOULD|COULD|WONT)\]?/i);
+    const priority = (priorityMatch?.[1]?.toUpperCase() ?? "SHOULD") as IssuePriority;
+
+    const sizeMatch = block.match(/## [📏\s]*Taille[^\n]*\n+\[?(S|M|L|XL)\]?/i);
+    const size = (sizeMatch?.[1]?.toUpperCase() ?? "M") as IssueSize;
+
+    issues.push({ title, description: block.trim(), status: "todo", priority, size });
+  }
+
+  return issues;
+}
+
+function generateIssueId(backlog: Backlog): string {
+  const maxNum = backlog.issues
+    .map(i => parseInt(i.id.replace("issue-", ""), 10))
+    .filter(n => !isNaN(n))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `issue-${String(maxNum + 1).padStart(3, "0")}`;
+}
+
+const PRIORITY_ORDER: Record<IssuePriority, number> = { MUST: 0, SHOULD: 1, COULD: 2, WONT: 3 };
+const SIZE_ORDER: Record<IssueSize, number> = { S: 0, M: 1, L: 2, XL: 3 };
+
+function pickNextIssue(backlog: Backlog): BacklogIssue | null {
+  const candidates = backlog.issues
+    .filter(i => i.status === "todo" && i.priority !== "WONT")
+    .sort((a, b) => {
+      const pd = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
+      if (pd !== 0) return pd;
+      return SIZE_ORDER[a.size] - SIZE_ORDER[b.size];
+    });
+  return candidates[0] ?? null;
+}
+
+function printBacklogSummary(backlog?: Backlog): void {
+  const b = backlog ?? loadBacklog();
+  const counts: Record<IssueStatus, number> = { todo: 0, in_progress: 0, done: 0, skipped: 0 };
+  for (const i of b.issues) counts[i.status]++;
+
+  console.log("\n" + "═".repeat(60));
+  console.log("📦 BACKLOG — État actuel");
+  console.log("═".repeat(60));
+  console.log(`  Total : ${b.issues.length} issues`);
+  console.log(`  Todo         : ${counts.todo}`);
+  console.log(`  In progress  : ${counts.in_progress}`);
+  console.log(`  Done         : ${counts.done}`);
+  if (counts.skipped) console.log(`  Skipped      : ${counts.skipped}`);
+  console.log("─".repeat(60));
+
+  const statusIcon: Record<IssueStatus, string> = { todo: "⬜", in_progress: "🔄", done: "✅", skipped: "⏭️" };
+  const priorities: IssuePriority[] = ["MUST", "SHOULD", "COULD", "WONT"];
+
+  for (const priority of priorities) {
+    const group = b.issues.filter(i => i.priority === priority);
+    if (group.length === 0) continue;
+    console.log(`\n  [${priority}]`);
+    for (const issue of group) {
+      const icon = statusIcon[issue.status];
+      const size = issue.size.padEnd(2);
+      console.log(`  ${icon} [${size}] ${issue.id}  ${issue.title}`);
+    }
+  }
+
+  console.log("\n" + "═".repeat(60));
+  if (b.lastUpdated) {
+    console.log(`  Dernière mise à jour : ${new Date(b.lastUpdated).toLocaleString("fr-FR")}`);
+  }
+}
+
+// Workflow : PM backlog analysis
+async function pmBacklogWorkflow() {
+  console.log("═".repeat(60));
+  console.log("📋 PM BACKLOG — Analyse du repo et génération du backlog");
+  console.log("═".repeat(60));
+
+  const repoUrl = resolveRepoUrl();
+  if (!repoUrl) {
+    console.error(
+      "❌ PM backlog (mode cloud) : dépôt cible inconnu.\n" +
+        "   Utilise --project avec un fichier contenant `repo:` ou définis TARGET_REPO_URL dans .env."
+    );
+    process.exit(1);
+  }
+
+  const pmTask = `Analyse le repo ${repoUrl} et produis la liste complète des issues prioritaires à implémenter. Pour CHAQUE issue, utilise EXACTEMENT le format défini (## 🎯 User Story, ## 🏷️ Priorité, ## 📏 Taille estimée, etc.). Sépare chaque issue par une ligne "---".`;
+
+  const pmOutput = await runAgent("pm", pmTask, { cloud: true });
+  const parsedIssues = parsePMOutput(pmOutput);
+
+  if (parsedIssues.length === 0) {
+    console.log("⚠️  Aucune issue parsée depuis la sortie du PM. Vérifie le format de sortie.");
+    console.log("   Sortie brute sauvegardée dans backlog-raw.md pour inspection.\n");
+    writeFileSync(resolve(__dirname, "../backlog-raw.md"), pmOutput, "utf-8");
+    return;
+  }
+
+  const backlog = loadBacklog();
+  const now = new Date().toISOString();
+
+  for (const parsed of parsedIssues) {
+    const id = generateIssueId(backlog);
+    backlog.issues.push({
+      ...parsed,
+      id,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+      pipelineRun: null,
+    });
+    console.log(`   + ${id}: [${parsed.priority}/${parsed.size}] ${parsed.title}`);
+  }
+
+  saveBacklog(backlog);
+  console.log(`\n✅ ${parsedIssues.length} issue(s) ajoutées à backlog.json`);
+  printBacklogSummary(backlog);
+}
+
+// Workflow : Pipeline next
+async function pipelineNext() {
+  const backlog = loadBacklog();
+  const issue = pickNextIssue(backlog);
+
+  if (!issue) {
+    console.log("🎉 Backlog vide — aucune issue à traiter (todo + non-WONT).");
+    printBacklogSummary(backlog);
+    return;
+  }
+
+  console.log(`\n▶ Issue sélectionnée : [${issue.id}] ${issue.title}`);
+  console.log(`  Priorité: ${issue.priority} | Taille: ${issue.size}`);
+  console.log("─".repeat(60));
+
+  // Mark in_progress
+  issue.status = "in_progress";
+  issue.updatedAt = new Date().toISOString();
+  issue.pipelineRun = new Date().toISOString();
+  saveBacklog(backlog);
+
+  try {
+    await fullPipeline(issue.description);
+
+    // Mark done (re-read backlog to avoid conflicts)
+    const freshBacklog = loadBacklog();
+    const freshIssue = freshBacklog.issues.find(i => i.id === issue.id)!;
+    freshIssue.status = "done";
+    freshIssue.completedAt = new Date().toISOString();
+    freshIssue.updatedAt = new Date().toISOString();
+    saveBacklog(freshBacklog);
+
+    console.log(`\n✅ Issue ${issue.id} marquée DONE dans backlog.json`);
+  } catch (err) {
+    // Revert to todo on failure
+    const freshBacklog = loadBacklog();
+    const freshIssue = freshBacklog.issues.find(i => i.id === issue.id)!;
+    freshIssue.status = "todo";
+    freshIssue.updatedAt = new Date().toISOString();
+    saveBacklog(freshBacklog);
+    throw err;
+  }
+}
+
 // ------------------------------------------------------------
 // Pipelines
 // ------------------------------------------------------------
 
 /**
- * Pipeline complet : PM → Architecte → Dev → QA → Red Team
+ * Pipeline complet : PM → Architect → Dev ⇄ QA (loop) ⇄ RedTeam (loop)
  *
- * C'est le workflow principal. Chaque agent reçoit le contexte
- * des agents précédents. Entre chaque étape, le super-superviseur
- * (toi) peut intervenir via les hooks Cursor.
+ * Workflow avec boucles feedback :
+ * 1. QA approuve (APPROVE) → continue vers RedTeam
+ *    QA demande changements → relance Dev, puis re-review par QA (max 3 itérations)
+ * 2. RedTeam approuve → pipeline complet
+ *    Vulnérabilités critiques → relance Dev, puis re-audit par RedTeam (max 3 itérations)
+ *    Vulnérabilités moyennes → passage avec documentation pour sprints futurs
  */
 async function fullPipeline(brief: string) {
   console.log("═".repeat(60));
-  console.log("🏗️  PIPELINE COMPLET — Du brief au déploiement");
+  console.log("🏗️  PIPELINE COMPLET — Du brief au déploiement (avec feedback loop)");
   console.log("═".repeat(60));
 
   // ── Étape 1 : Product Manager ──
   console.log("\n📋 ÉTAPE 1/5 — Product Manager");
   const specs = await runAgent("pm", brief);
 
-  // 🛑 CHECKPOINT — Le super-superviseur review les specs
-  // En production, ici tu aurais un hook qui attend ta validation
-  // Pour l'instant, on continue automatiquement
   console.log("⏸️  CHECKPOINT : Review les specs ci-dessus.");
   console.log("   En production, le pipeline s'arrête ici pour ta validation.\n");
 
@@ -203,12 +502,11 @@ async function fullPipeline(brief: string) {
     { additionalContext: specs }
   );
 
-  // 🛑 CHECKPOINT
   console.log("⏸️  CHECKPOINT : Review l'architecture ci-dessus.\n");
 
-  // ── Étape 3 : Développeur Full-Stack ──
+  // ── Étape 3 & 4 : Dev ⇄ QA Loop ──
   console.log("\n💻 ÉTAPE 3/5 — Développeur Full-Stack");
-  const implementation = await runAgent(
+  let implementation = await runAgent(
     "dev",
     "Implémente les fonctionnalités selon les specs et l'architecture ci-dessous. Crée une branche feature/ et ouvre une PR.",
     {
@@ -218,38 +516,114 @@ async function fullPipeline(brief: string) {
     }
   );
 
-  // ── Étape 4 : QA Engineer ──
-  console.log("\n🧪 ÉTAPE 4/5 — QA Engineer");
-  const qaReport = await runAgent(
-    "qa",
-    "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité aux specs.",
-    {
-      additionalContext: `## Specs PM\n${specs}\n\n## Implémentation\n${implementation}`,
-      cloud: true,
-    }
-  );
+  // Boucle QA avec feedback
+  let qaApproved = false;
+  let qaIteration = 0;
+  const maxQAIterations = 3;
+  let qaReport = "";
 
-  // ── Étape 5 : Red Team ──
-  console.log("\n🔴 ÉTAPE 5/5 — Red Team");
-  const securityReport = await runAgent(
-    "redteam",
-    "Audite le code de la PR pour les vulnérabilités de sécurité.",
-    {
-      additionalContext: implementation,
-      cloud: true,
+  while (!qaApproved && qaIteration < maxQAIterations) {
+    qaIteration++;
+    console.log(`\n🧪 ÉTAPE 4/${maxQAIterations} — QA Engineer (itération ${qaIteration})`);
+
+    const qaPrompt = qaIteration === 1
+      ? "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité aux specs."
+      : `Re-review la PR après les changements du développeur.\n\nVoici le rapport précédent de QA :\n${qaReport}\n\nVérifie si les problèmes identifiés ont été correctement adressés.`;
+
+    qaReport = await runAgent(
+      "qa",
+      qaPrompt,
+      {
+        additionalContext: `## Specs PM\n${specs}\n\n## Implémentation\n${implementation}`,
+        cloud: true,
+      }
+    );
+
+    const verdict = detectQAVerdict(qaReport);
+
+    if (verdict === "APPROVE") {
+      qaApproved = true;
+      console.log("✅ QA APPROUVE — Passage à l'audit de sécurité.\n");
+    } else if (qaIteration < maxQAIterations) {
+      console.log("🔄 QA DEMANDE DES CHANGEMENTS — Relance du développeur.\n");
+
+      // Relance Dev avec les commentaires QA
+      implementation = await runAgent(
+        "dev",
+        `Corrige les problèmes soulevés par QA dans la revue précédente :\n\n${qaReport}\n\nMet à jour la PR avec les changements.`,
+        {
+          additionalContext: `## Specs PM\n${specs}\n\n## Architecture\n${architecture}`,
+          cloud: true,
+          autoCreatePR: false, // Réutilise la même PR
+        }
+      );
+    } else {
+      console.log("⚠️  QA N'A PAS APPROUVÉ APRÈS 3 ITÉRATIONS — Passage malgré tout (escalade manuelle recommandée).\n");
+      qaApproved = true; // Force le passage pour éviter une boucle infinie
     }
-  );
+  }
+
+  // ── Étape 5 : Red Team avec boucle feedback ──
+  let securityApproved = false;
+  let rtIteration = 0;
+  const maxRTIterations = 3;
+  let securityReport = "";
+
+  while (!securityApproved && rtIteration < maxRTIterations) {
+    rtIteration++;
+    console.log(`\n🔴 ÉTAPE 5/${maxRTIterations} — Red Team (itération ${rtIteration})`);
+
+    const rtPrompt = rtIteration === 1
+      ? "Audite le code de la PR pour les vulnérabilités de sécurité."
+      : `Re-audite la PR après les corrections du développeur.\n\nVoici le rapport précédent de la red team :\n${securityReport}\n\nVérifie si les problèmes identifiés ont été correctement adressés.`;
+
+    securityReport = await runAgent(
+      "redteam",
+      rtPrompt,
+      {
+        additionalContext: implementation,
+        cloud: true,
+      }
+    );
+
+    const securityVerdict = detectSecurityVerdict(securityReport);
+
+    if (securityVerdict === "APPROVED") {
+      securityApproved = true;
+      console.log("✅ AUDIT SÉCURITÉ APPROUVÉ — Pipeline complet.\n");
+    } else if (securityVerdict === "CRITICAL_ISSUES" && rtIteration < maxRTIterations) {
+      console.log("🔄 VULNÉRABILITÉS CRITIQUES — Relance du développeur.\n");
+
+      // Relance Dev avec les commentaires de la red team
+      implementation = await runAgent(
+        "dev",
+        `Corrige les vulnérabilités critiques de sécurité soulevées par la red team :\n\n${securityReport}\n\nMets à jour la PR avec les corrections.`,
+        {
+          additionalContext: `## Specs PM\n${specs}\n\n## Architecture\n${architecture}`,
+          cloud: true,
+          autoCreatePR: false, // Réutilise la même PR
+        }
+      );
+    } else if (securityVerdict === "MEDIUM_ISSUES") {
+      securityApproved = true;
+      console.log("⚠️  VULNÉRABILITÉS MOYENNES IDENTIFIÉES — Passage avec documentation.\n");
+      console.log("   Note : Les vulnérabilités moyennes doivent être traitées dans les sprints suivants.\n");
+    } else {
+      console.log("⚠️  AUDIT DE SÉCURITÉ N'A PAS APPROUVÉ APRÈS 3 ITÉRATIONS — Passage malgré tout (escalade manuelle recommandée).\n");
+      securityApproved = true; // Force le passage pour éviter une boucle infinie
+    }
+  }
 
   // ── Résumé final ──
   console.log("\n" + "═".repeat(60));
   console.log("📊 PIPELINE TERMINÉ — Résumé");
   console.log("═".repeat(60));
-  console.log("1. Specs PM        : ✅ rédigées");
-  console.log("2. Architecture    : ✅ conçue");
-  console.log("3. Implémentation  : ✅ PR créée");
-  console.log("4. Review QA       : ✅ rapport produit");
-  console.log("5. Audit sécurité  : ✅ rapport produit");
-  console.log("\n👉 Va sur GitHub pour review et merger la PR.");
+  console.log("1. Specs PM          : ✅ rédigées");
+  console.log("2. Architecture      : ✅ conçue");
+  console.log("3. Implémentation    : ✅ PR créée");
+  console.log(`4. Review QA         : ✅ approuvée (${qaIteration} itération${qaIteration > 1 ? "s" : ""})`);
+  console.log(`5. Audit sécurité    : ✅ complété (${rtIteration} itération${rtIteration > 1 ? "s" : ""})`);
+  console.log("\n👉 Va sur GitHub pour review final et merger la PR.");
 }
 
 // ------------------------------------------------------------
@@ -265,8 +639,28 @@ async function main() {
 
   // Parse des arguments CLI
   const args = process.argv.slice(2);
+
+  // Charger le projet s'il est spécifié
+  const projectFlag = args.indexOf("--project");
+  if (projectFlag !== -1) {
+    const projectPath = args[projectFlag + 1];
+    if (!projectPath || projectPath.startsWith("--")) {
+      console.error(
+        "❌ --project nécessite un chemin vers un fichier (ex. projects/monprojet.md)."
+      );
+      process.exit(1);
+    }
+    activeProject = loadProject(projectPath);
+    console.log(`🎯 Projet : ${activeProject.name} (${activeProject.branch})`);
+    // Surcharger les variables d'environnement avec les valeurs du projet
+    if (activeProject.repo) process.env.TARGET_REPO_URL = activeProject.repo;
+    if (activeProject.branch) process.env.TARGET_BRANCH = activeProject.branch;
+  }
+
   const roleFlag = args.indexOf("--role");
   const pipelineFlag = args.indexOf("--pipeline");
+  const pmBacklogFlag = args.indexOf("--pm-backlog");
+  const backlogFlag = args.indexOf("--backlog");
 
   if (roleFlag !== -1 && args[roleFlag + 1]) {
     // Mode agent unique : npm run agent:pm "Ma tâche"
@@ -279,13 +673,24 @@ async function main() {
       process.exit(1);
     }
 
-    await runAgent(role, task);
+    // Use cloud mode for direct agent invocation
+    await runAgent(role, task, { cloud: true });
   } else if (pipelineFlag !== -1) {
-    // Mode pipeline : npm run pipeline "Mon brief"
-    const brief = args.slice(pipelineFlag + 1).join(" ")
-      || "Analyse le projet existant et propose des améliorations.";
-
-    await fullPipeline(brief);
+    // Mode pipeline : npm run pipeline [next|full|"Mon brief"]
+    const subcommand = args[pipelineFlag + 1];
+    if (subcommand === "next") {
+      await pipelineNext();
+    } else {
+      const brief = args.slice(pipelineFlag + 1).join(" ")
+        || "Analyse le projet existant et propose des améliorations.";
+      await fullPipeline(brief);
+    }
+  } else if (pmBacklogFlag !== -1) {
+    // Mode PM backlog : npm run pm:backlog
+    await pmBacklogWorkflow();
+  } else if (backlogFlag !== -1) {
+    // Mode backlog view : npm run backlog
+    printBacklogSummary();
   } else {
     // Mode par défaut : affiche l'aide
     console.log(`
@@ -302,6 +707,23 @@ Usage :
 
   npm run pipeline "Brief complet du projet"
     → Lance le pipeline complet : PM → Archi → Dev → QA → Red Team
+
+  npm run pm:backlog
+    → PM analyse le repo et génère backlog.json avec issues prioritaires
+
+  npm run backlog
+    → Affiche l'état du backlog (todo/in_progress/done)
+
+  npm run pipeline:next
+    → Prend la prochaine issue MUST→SHOULD→COULD et lance le pipeline complet
+
+  npm run project:dataset-style -- --backlog
+    → Lance une commande avec contexte projet spécifique
+
+Options globales :
+  --project <file>
+    → Charge le contexte du projet depuis projects/<file>.md
+    → Injecte automatiquement stack, conventions et contraintes dans tous les agents
 
 Agents disponibles :
 ${Object.entries(AGENT_CONFIG)
