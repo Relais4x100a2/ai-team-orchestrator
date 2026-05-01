@@ -80,7 +80,7 @@ ai-team-orchestrator/
 ├── CLAUDE.md                  # 📝 Contexte pour Claude Code
 ├── package.json
 ├── tsconfig.json
-├── backlog.json              # 📋 État du backlog (généré)
+├── backlog.json              # 📋 État du backlog (généré localement, non versionné)
 └── .env.example
 ```
 
