@@ -89,6 +89,7 @@ ai-team-orchestrator/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml             # ⚙️ CI pour l'orchestrateur
+├── last-run/                  # 💾 Sauvegardes auto des sorties (non versionné)
 ├── CLAUDE.md                  # 📝 Contexte pour Claude Code
 ├── package.json
 ├── tsconfig.json
@@ -170,6 +171,21 @@ npm run project:dataset-style -- --pipeline full "Brief de la fonctionnalité"
 
 # Pipeline avec backlog (prend la prochaine issue dans le backlog)
 npm run project:dataset-style -- --pipeline next
+```
+
+**Reprise et fichiers de brief :**
+Après chaque exécution d'un agent, sa sortie est automatiquement sauvegardée dans le dossier `last-run/<role>.md`. Tu peux utiliser ces fichiers pour reprendre le pipeline où tu le souhaites sans repasser par les étapes précédentes.
+
+```bash
+# Lancer le PM pour explorer et générer le brief (sauvegardé dans last-run/pm.md)
+npm run agent:pm "Brief initial..."
+
+# Reprendre le pipeline à partir de l'architecte en utilisant la sortie du PM
+npm run pipeline -- --brief-file last-run/pm.md --resume-from architect
+# → L'étape PM est sautée, l'architecte reçoit le contenu de pm.md comme contexte
+
+# Reprendre depuis le dev (ex: après avoir refusé manuellement l'architecture et l'avoir relancée)
+npm run pipeline -- --brief-file last-run/architect.md --resume-from dev
 ```
 
 **Mode d’exécution :** les étapes **Product Manager** et **Data Architect** tournent en **local** sur le répertoire courant de l’orchestrateur (`cwd`). À partir du **Développeur**, le pipeline utilise **cloud** Cursor contre le repo cible défini dans le fichier projet ou `.env` (`TARGET_REPO_URL`).

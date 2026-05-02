@@ -20,7 +20,7 @@
 
 import "dotenv/config";
 import { Agent } from "@cursor/sdk";
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import matter from "gray-matter";
@@ -178,6 +178,11 @@ const AGENT_CONFIG = {
 
 type AgentRole = keyof typeof AGENT_CONFIG;
 
+type PipelineStep = "pm" | "architect" | "dev" | "qa" | "redteam";
+const PIPELINE_STEPS: PipelineStep[] = ["pm", "architect", "dev", "qa", "redteam"];
+
+const LAST_RUN_DIR = resolve(__dirname, "../last-run");
+
 /** URL du repo cible pour le mode cloud : projet actif ou .env */
 function resolveRepoUrl(): string | undefined {
   const fromProject = activeProject?.repo?.trim();
@@ -283,6 +288,20 @@ async function runAgent(
     console.log("(Pas de sortie retournée par l'agent)");
   }
   const result = runResult.result || "";
+
+  // Auto-save output to last-run/<role>.md for reuse
+  // Note: filename is fixed per role — lancer deux pipelines en parallèle
+  // sur le même rôle s'écrase mutuellement (race condition intentionnellement
+  // ignorée : outil local mono-utilisateur).
+  if (result) {
+    try {
+      mkdirSync(LAST_RUN_DIR, { recursive: true });
+      writeFileSync(resolve(LAST_RUN_DIR, `${role}.md`), result, "utf-8");
+      console.log(`\n   💾 Sortie sauvegardée : last-run/${role}.md`);
+    } catch (e) {
+      console.error(`   ⚠️  Impossible de sauvegarder last-run/${role}.md : ${(e as Error).message}`);
+    }
+  }
 
   console.log("\n" + "─".repeat(60));
   console.log(`✅ Agent ${role} terminé.\n`);
@@ -518,85 +537,119 @@ async function pipelineNext() {
  * 2. RedTeam approuve → pipeline complet
  *    Vulnérabilités critiques → relance Dev, puis re-audit par RedTeam (max 3 itérations)
  *    Vulnérabilités moyennes → passage avec documentation pour sprints futurs
+ *
+ * @param brief - Brief de départ (ou sortie d'étapes précédentes si resumeFrom est utilisé)
+ * @param opts.resumeFrom - Reprendre depuis cette étape (les étapes antérieures sont ignorées)
  */
-async function fullPipeline(brief: string) {
+async function fullPipeline(brief: string, opts: { resumeFrom?: PipelineStep } = {}) {
+  const resumeFrom = opts.resumeFrom ?? "pm";
+  const startIdx = PIPELINE_STEPS.indexOf(resumeFrom);
+
   console.log("═".repeat(60));
   console.log("🏗️  PIPELINE COMPLET — Du brief au déploiement (avec feedback loop)");
+  if (resumeFrom !== "pm") {
+    console.log(`   ⏩ Reprise depuis : ${resumeFrom.toUpperCase()} (étapes précédentes ignorées)`);
+    console.log(`   📄 Contexte injecté depuis le brief fourni.`);
+  }
   console.log("═".repeat(60));
 
-  // ── Étape 1 : Product Manager ──
-  console.log("\n📋 ÉTAPE 1/5 — Product Manager");
-  const specs = await runAgent("pm", brief);
+  // Quand on reprend depuis une étape intermédiaire, le brief joue le rôle
+  // du contexte accumulé des étapes précédentes.
+  let specs = brief;
+  let architecture = "";
 
-  console.log("⏸️  CHECKPOINT : Review les specs ci-dessus.");
-  console.log("   En production, le pipeline s'arrête ici pour ta validation.\n");
+  // ── Étape 1 : Product Manager ──
+  if (startIdx === 0) {
+    console.log("\n📋 ÉTAPE 1/5 — Product Manager");
+    specs = await runAgent("pm", brief);
+    console.log("⏸️  CHECKPOINT : Review les specs ci-dessus.");
+    console.log("   En production, le pipeline s'arrête ici pour ta validation.\n");
+  } else {
+    console.log("\n📋 ÉTAPE 1/5 — Product Manager : ⏭  ignoré (--resume-from)");
+  }
 
   // ── Étape 2 : Data Architect ──
-  console.log("\n🏛️  ÉTAPE 2/5 — Data Architect");
-  const architecture = await runAgent(
-    "architect",
-    "Conçois l'architecture technique et le modèle de données pour les specs suivantes.",
-    { additionalContext: specs }
-  );
-
-  console.log("⏸️  CHECKPOINT : Review l'architecture ci-dessus.\n");
+  if (startIdx <= 1) {
+    console.log("\n🏛️  ÉTAPE 2/5 — Data Architect");
+    architecture = await runAgent(
+      "architect",
+      "Conçois l'architecture technique et le modèle de données pour les specs suivantes.",
+      { additionalContext: specs }
+    );
+    console.log("⏸️  CHECKPOINT : Review l'architecture ci-dessus.\n");
+  } else {
+    console.log("\n🏛️  ÉTAPE 2/5 — Data Architect : ⏭  ignoré (--resume-from)");
+  }
 
   // ── Étape 3 & 4 : Dev ⇄ QA Loop ──
-  console.log("\n💻 ÉTAPE 3/5 — Développeur Full-Stack");
-  let implementation = await runAgent(
-    "dev",
-    "Implémente les fonctionnalités selon les specs et l'architecture ci-dessous. Crée une branche feature/ et ouvre une PR.",
-    {
-      additionalContext: `## Specs PM\n${specs}\n\n## Architecture\n${architecture}`,
-      cloud: true,
-      autoCreatePR: true,
-    }
-  );
+  const devContext = architecture
+    ? `## Specs PM\n${specs}\n\n## Architecture\n${architecture}`
+    : `## Contexte fourni\n${specs}`;
+
+  if (startIdx <= 2) {
+    console.log("\n💻 ÉTAPE 3/5 — Développeur Full-Stack");
+  }
+  let implementation = startIdx <= 2
+    ? await runAgent(
+        "dev",
+        "Implémente les fonctionnalités selon les specs et l'architecture ci-dessous. Crée une branche feature/ et ouvre une PR.",
+        { additionalContext: devContext, cloud: true, autoCreatePR: true }
+      )
+    : brief; // si on reprend depuis QA ou redteam, le brief est le contexte de l'implémentation
 
   // Boucle QA avec feedback
-  let qaApproved = false;
+  let qaApproved = startIdx > 3; // si on reprend depuis redteam, QA est déjà passé
   let qaIteration = 0;
   const maxQAIterations = 3;
   let qaReport = "";
 
-  while (!qaApproved && qaIteration < maxQAIterations) {
-    qaIteration++;
-    console.log(`\n🧪 ÉTAPE 4/${maxQAIterations} — QA Engineer (itération ${qaIteration})`);
+  if (startIdx > 3) {
+    console.log("\n🧪 ÉTAPE 4/5 — QA Engineer : ⏭  ignoré (--resume-from)");
+  } else {
+    while (!qaApproved && qaIteration < maxQAIterations) {
+      qaIteration++;
+      console.log(`\n🧪 ÉTAPE 4/${maxQAIterations} — QA Engineer (itération ${qaIteration})`);
 
-    const qaPrompt = qaIteration === 1
-      ? "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité aux specs."
-      : `Re-review la PR après les changements du développeur.\n\nVoici le rapport précédent de QA :\n${qaReport}\n\nVérifie si les problèmes identifiés ont été correctement adressés.`;
+      const qaPrompt = qaIteration === 1
+        ? "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité aux specs."
+        : `Re-review la PR après les changements du développeur.\n\nVoici le rapport précédent de QA :\n${qaReport}\n\nVérifie si les problèmes identifiés ont été correctement adressés.`;
 
-    qaReport = await runAgent(
-      "qa",
-      qaPrompt,
-      {
-        additionalContext: `## Specs PM\n${specs}\n\n## Implémentation\n${implementation}`,
-        cloud: true,
-      }
-    );
+      // Quand on reprend depuis QA (startIdx >= 3), specs === brief === implementation.
+      // Passer les deux créerait une duplication — on passe uniquement le brief.
+      const qaAdditionalContext = startIdx >= 3
+        ? `## Contexte d'implémentation\n${brief}`
+        : `## Specs PM\n${specs}\n\n## Implémentation\n${implementation}`;
 
-    const verdict = detectQAVerdict(qaReport);
-
-    if (verdict === "APPROVE") {
-      qaApproved = true;
-      console.log("✅ QA APPROUVE — Passage à l'audit de sécurité.\n");
-    } else if (qaIteration < maxQAIterations) {
-      console.log("🔄 QA DEMANDE DES CHANGEMENTS — Relance du développeur.\n");
-
-      // Relance Dev avec les commentaires QA
-      implementation = await runAgent(
-        "dev",
-        `Corrige les problèmes soulevés par QA dans la revue précédente :\n\n${qaReport}\n\nMet à jour la PR avec les changements.`,
+      qaReport = await runAgent(
+        "qa",
+        qaPrompt,
         {
-          additionalContext: `## Specs PM\n${specs}\n\n## Architecture\n${architecture}`,
+          additionalContext: qaAdditionalContext,
           cloud: true,
-          autoCreatePR: false, // Réutilise la même PR
         }
       );
-    } else {
-      console.log("⚠️  QA N'A PAS APPROUVÉ APRÈS 3 ITÉRATIONS — Passage malgré tout (escalade manuelle recommandée).\n");
-      qaApproved = true; // Force le passage pour éviter une boucle infinie
+
+      const verdict = detectQAVerdict(qaReport);
+
+      if (verdict === "APPROVE") {
+        qaApproved = true;
+        console.log("✅ QA APPROUVE — Passage à l'audit de sécurité.\n");
+      } else if (qaIteration < maxQAIterations) {
+        console.log("🔄 QA DEMANDE DES CHANGEMENTS — Relance du développeur.\n");
+
+        implementation = await runAgent(
+          "dev",
+          `Corrige les problèmes soulevés par QA dans la revue précédente :\n\n${qaReport}\n\nMet à jour la PR avec les changements.`,
+          {
+            additionalContext: devContext,
+            cloud: true,
+            autoCreatePR: false,
+          }
+        );
+      } else {
+        console.log("⚠️  QA N'A PAS APPROUVÉ APRÈS 3 ITÉRATIONS — Passage malgré tout (escalade manuelle recommandée).\n");
+        qaApproved = true;
+      }
     }
   }
 
@@ -631,14 +684,13 @@ async function fullPipeline(brief: string) {
     } else if (securityVerdict === "CRITICAL_ISSUES" && rtIteration < maxRTIterations) {
       console.log("🔄 VULNÉRABILITÉS CRITIQUES — Relance du développeur.\n");
 
-      // Relance Dev avec les commentaires de la red team
       implementation = await runAgent(
         "dev",
         `Corrige les vulnérabilités critiques de sécurité soulevées par la red team :\n\n${securityReport}\n\nMets à jour la PR avec les corrections.`,
         {
-          additionalContext: `## Specs PM\n${specs}\n\n## Architecture\n${architecture}`,
+          additionalContext: devContext,
           cloud: true,
-          autoCreatePR: false, // Réutilise la même PR
+          autoCreatePR: false,
         }
       );
     } else if (securityVerdict === "MEDIUM_ISSUES") {
@@ -647,18 +699,19 @@ async function fullPipeline(brief: string) {
       console.log("   Note : Les vulnérabilités moyennes doivent être traitées dans les sprints suivants.\n");
     } else {
       console.log("⚠️  AUDIT DE SÉCURITÉ N'A PAS APPROUVÉ APRÈS 3 ITÉRATIONS — Passage malgré tout (escalade manuelle recommandée).\n");
-      securityApproved = true; // Force le passage pour éviter une boucle infinie
+      securityApproved = true;
     }
   }
 
   // ── Résumé final ──
+  const skipped = (step: PipelineStep) => PIPELINE_STEPS.indexOf(step) < startIdx;
   console.log("\n" + "═".repeat(60));
   console.log("📊 PIPELINE TERMINÉ — Résumé");
   console.log("═".repeat(60));
-  console.log("1. Specs PM          : ✅ rédigées");
-  console.log("2. Architecture      : ✅ conçue");
-  console.log("3. Implémentation    : ✅ PR créée");
-  console.log(`4. Review QA         : ✅ approuvée (${qaIteration} itération${qaIteration > 1 ? "s" : ""})`);
+  console.log(`1. Specs PM          : ${skipped("pm") ? "⏭  ignoré" : "✅ rédigées"}`);
+  console.log(`2. Architecture      : ${skipped("architect") ? "⏭  ignoré" : "✅ conçue"}`);
+  console.log(`3. Implémentation    : ${skipped("dev") ? "⏭  ignoré" : "✅ PR créée"}`);
+  console.log(`4. Review QA         : ${skipped("qa") ? "⏭  ignoré" : `✅ approuvée (${qaIteration} itération${qaIteration > 1 ? "s" : ""})`}`);
   console.log(`5. Audit sécurité    : ✅ complété (${rtIteration} itération${rtIteration > 1 ? "s" : ""})`);
   console.log("\n👉 Va sur GitHub pour review final et merger la PR.");
 }
@@ -694,6 +747,40 @@ async function main() {
     if (activeProject.branch) process.env.TARGET_BRANCH = activeProject.branch;
   }
 
+  // --brief-file : lit le brief depuis un fichier plutôt que depuis la CLI
+  let briefFromFile: string | null = null;
+  const briefFileFlag = args.indexOf("--brief-file");
+  if (briefFileFlag !== -1 && args[briefFileFlag + 1]) {
+    const briefFilePath = resolve(process.cwd(), args[briefFileFlag + 1]);
+    // LFI guard : refuser tout chemin qui sort du répertoire courant
+    if (!briefFilePath.startsWith(resolve(process.cwd()) + "/")) {
+      console.error(
+        "❌ --brief-file : chemin non autorisé.\n" +
+        "   Seuls les fichiers dans le dossier courant sont acceptés."
+      );
+      process.exit(1);
+    }
+    if (!existsSync(briefFilePath)) {
+      console.error(`❌ --brief-file : fichier introuvable : ${briefFilePath}`);
+      process.exit(1);
+    }
+    briefFromFile = readFileSync(briefFilePath, "utf-8").trim();
+    console.log(`📄 Brief chargé depuis : ${args[briefFileFlag + 1]}`);
+  }
+
+  // --resume-from : reprendre le pipeline à une étape donnée
+  let resumeFrom: PipelineStep | undefined;
+  const resumeFlag = args.indexOf("--resume-from");
+  if (resumeFlag !== -1 && args[resumeFlag + 1]) {
+    const step = args[resumeFlag + 1] as PipelineStep;
+    if (!PIPELINE_STEPS.includes(step)) {
+      console.error(`❌ --resume-from : étape inconnue « ${step} »`);
+      console.error(`   Étapes valides : ${PIPELINE_STEPS.join(", ")}`);
+      process.exit(1);
+    }
+    resumeFrom = step;
+  }
+
   const roleFlag = args.indexOf("--role");
   const pipelineFlag = args.indexOf("--pipeline");
   const pmBacklogFlag = args.indexOf("--pm-backlog");
@@ -702,7 +789,8 @@ async function main() {
   if (roleFlag !== -1 && args[roleFlag + 1]) {
     // Mode agent unique : npm run agent:pm "Ma tâche"
     const role = args[roleFlag + 1] as AgentRole;
-    const task = args.slice(roleFlag + 2).join(" ") || "Analyse le projet et propose des améliorations.";
+    const taskFromCli = args.slice(roleFlag + 2).join(" ");
+    const task = briefFromFile ?? (taskFromCli || "Analyse le projet et propose des améliorations.");
 
     if (!(role in AGENT_CONFIG)) {
       console.error(`❌ Rôle inconnu : ${role}`);
@@ -718,9 +806,9 @@ async function main() {
     if (subcommand === "next") {
       await pipelineNext();
     } else {
-      const brief = args.slice(pipelineFlag + 1).join(" ")
-        || "Analyse le projet existant et propose des améliorations.";
-      await fullPipeline(brief);
+      const briefFromCli = args.slice(pipelineFlag + 1).join(" ");
+      const brief = briefFromFile ?? (briefFromCli || "Analyse le projet existant et propose des améliorations.");
+      await fullPipeline(brief, { resumeFrom });
     }
   } else if (pmBacklogFlag !== -1) {
     // Mode PM backlog : npm run pm:backlog
@@ -761,6 +849,17 @@ Options globales :
   --project <file>
     → Charge le contexte du projet depuis projects/<file>.md
     → Injecte automatiquement stack, conventions et contraintes dans tous les agents
+
+  --brief-file <file>
+    → Lit le brief/tâche depuis un fichier plutôt que depuis la CLI
+    → Permet de passer de longs textes (ex: last-run/pm.md comme brief pour l'architecte)
+    → Compatible avec --role, --pipeline
+
+  --resume-from <step>
+    → Reprend le pipeline à une étape donnée en ignorant les étapes précédentes
+    → Étapes : pm | architect | dev | qa | redteam
+    → Le brief fourni joue le rôle du contexte accumulé des étapes ignorées
+    → Exemple : après un --role pm, passer last-run/pm.md à --pipeline avec --resume-from architect
 
 Agents disponibles :
 ${Object.entries(AGENT_CONFIG)

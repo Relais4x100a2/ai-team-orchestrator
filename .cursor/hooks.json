@@ -1,28 +1,4 @@
 {
-  "$schema": "https://cursor.com/schemas/hooks.json",
-  "hooks": {
-    "onFileChange": {
-      "description": "Log quand un agent modifie un fichier (traçabilité)",
-      "match": ["**/*.py", "**/*.sql", "**/Dockerfile", "**/captain-definition"],
-      "action": "log",
-      "message": "📝 Fichier modifié par un agent : {{file}}"
-    },
-    "onPRCreate": {
-      "description": "Notifie le super-superviseur quand une PR est créée",
-      "action": "notify",
-      "message": "🔔 Nouvelle PR créée. Review requise avant merge."
-    },
-    "beforeDangerousAction": {
-      "description": "Demande confirmation avant les actions destructives",
-      "match": [
-        "rm -rf",
-        "DROP TABLE",
-        "DELETE FROM",
-        "docker system prune",
-        "git push --force"
-      ],
-      "action": "confirm",
-      "message": "⚠️ Action potentiellement destructive détectée. Confirmer ?"
-    }
-  }
+  "version": 1,
+  "hooks": {}
 }
