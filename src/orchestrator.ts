@@ -24,36 +24,25 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import matter from "gray-matter";
+import {
+  createAgentConfig,
+  PIPELINE_STEPS,
+  type AgentRole,
+  type PipelineStep,
+} from "./agent-config.js";
+import type { Backlog, BacklogIssue, IssuePriority, IssueStatus } from "./backlog.js";
+import {
+  generateIssueId,
+  parsePMOutput,
+  pickNextIssue,
+} from "./backlog.js";
+import { detectQAVerdict, detectSecurityVerdict } from "./pipeline-detection.js";
 
 // Configure ripgrep path for local agent operations
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rgPath = resolve(__dirname, "../node_modules/ripgrep/lib/rg.mjs");
 if (existsSync(rgPath) && !process.env.RG_PATH) {
   process.env.RG_PATH = rgPath;
-}
-
-// Backlog management types
-type IssueStatus = "todo" | "in_progress" | "done" | "skipped";
-type IssuePriority = "MUST" | "SHOULD" | "COULD" | "WONT";
-type IssueSize = "S" | "M" | "L" | "XL";
-
-interface BacklogIssue {
-  id: string;
-  title: string;
-  description: string;
-  status: IssueStatus;
-  priority: IssuePriority;
-  size: IssueSize;
-  createdAt: string;
-  updatedAt: string;
-  completedAt: string | null;
-  pipelineRun: string | null;
-}
-
-interface Backlog {
-  version: number;
-  lastUpdated: string;
-  issues: BacklogIssue[];
 }
 
 interface ProjectContext {
@@ -96,90 +85,7 @@ function loadProject(filePath: string): ProjectContext {
 }
 
 /** Configuration des agents — modèles via MODEL_STRONG / MODEL_FAST dans .env */
-const AGENT_CONFIG = {
-  // Le PM utilise un modèle puissant car il doit bien comprendre le contexte
-  pm: {
-    promptFile: "product-manager",
-    model: process.env.MODEL_STRONG || "gpt-5-mini",
-    description: "Product Manager — specs & backlog",
-  },
-
-  // L'architecte a besoin de raisonnement complexe
-  architect: {
-    promptFile: "data-architect",
-    model: process.env.MODEL_STRONG || "gpt-5-mini",
-    description: "Data Architect — modèle de données & architecture",
-  },
-
-  // L'UX designer peut utiliser un modèle plus léger
-  ux: {
-    promptFile: "ux-designer",
-    model: process.env.MODEL_FAST || "composer-2",
-    description: "UX Designer — parcours utilisateur & wireframes",
-  },
-
-  // Le dev full-stack utilise un modèle rapide
-  dev: {
-    promptFile: "fullstack-dev",
-    model: process.env.MODEL_FAST || "composer-2",
-    description: "Développeur Full-Stack — implémentation",
-  },
-
-  // Le QA peut utiliser un modèle rapide pour les reviews
-  qa: {
-    promptFile: "qa-engineer",
-    model: process.env.MODEL_FAST || "composer-2",
-    description: "QA Engineer — review & tests",
-  },
-
-  // La red team (tâches sensibles) : modèle « strong » mais économique par défaut
-  redteam: {
-    promptFile: "red-team",
-    model: process.env.MODEL_STRONG || "gpt-5-mini",
-    description: "Red Team — audit de sécurité",
-  },
-
-  devops: {
-    promptFile: "devops-platform",
-    model: process.env.MODEL_STRONG || "gpt-5-mini",
-    description: "DevOps / Plateforme — CI/CD & infra",
-  },
-
-  sre: {
-    promptFile: "sre-observability",
-    model: process.env.MODEL_STRONG || "gpt-5-mini",
-    description: "SRE / Observabilité — logs, métriques, alertes",
-  },
-
-  release: {
-    promptFile: "release-manager",
-    model: process.env.MODEL_FAST || "composer-2",
-    description: "Release — versioning & changelog",
-  },
-
-  ui: {
-    promptFile: "ui-designer",
-    model: process.env.MODEL_FAST || "composer-2",
-    description: "UI Designer — design visuel & tokens",
-  },
-
-  techwriter: {
-    promptFile: "technical-writer",
-    model: process.env.MODEL_FAST || "composer-2",
-    description: "Rédaction technique — guides & doc utilisateur",
-  },
-
-  privacy: {
-    promptFile: "privacy-by-design",
-    model: process.env.MODEL_STRONG || "gpt-5-mini",
-    description: "Privacy by design — données & conformité produit",
-  },
-} as const;
-
-type AgentRole = keyof typeof AGENT_CONFIG;
-
-type PipelineStep = "pm" | "architect" | "dev" | "qa" | "redteam";
-const PIPELINE_STEPS: PipelineStep[] = ["pm", "architect", "dev", "qa", "redteam"];
+const AGENT_CONFIG = createAgentConfig();
 
 const LAST_RUN_DIR = resolve(__dirname, "../last-run");
 
@@ -309,28 +215,6 @@ async function runAgent(
   return result;
 }
 
-// Détecte si QA approuve ou demande des changements
-function detectQAVerdict(qaReport: string): "APPROVE" | "REQUEST_CHANGES" {
-  const lowerReport = qaReport.toLowerCase();
-  if (lowerReport.includes("request changes") || lowerReport.includes("request_changes")) {
-    return "REQUEST_CHANGES";
-  }
-  return "APPROVE";
-}
-
-// Détecte si la red team a des vulnérabilités critiques/majeures
-function detectSecurityVerdict(securityReport: string): "APPROVED" | "CRITICAL_ISSUES" | "MEDIUM_ISSUES" {
-  const lowerReport = securityReport.toLowerCase();
-  if (lowerReport.includes("🚨 vulnérabilités critiques") || lowerReport.includes("vulnérabilités critiques")) {
-    return "CRITICAL_ISSUES";
-  }
-  if (lowerReport.includes("⚠️ vulnérabilités moyennes") || lowerReport.includes("vulnérabilités moyennes")) {
-    return "MEDIUM_ISSUES";
-  }
-  return "APPROVED";
-}
-
-// Backlog management functions
 function loadBacklog(): Backlog {
   if (!existsSync(BACKLOG_PATH)) {
     return { version: 1, lastUpdated: new Date().toISOString(), issues: [] };
@@ -341,60 +225,6 @@ function loadBacklog(): Backlog {
 function saveBacklog(backlog: Backlog): void {
   backlog.lastUpdated = new Date().toISOString();
   writeFileSync(BACKLOG_PATH, JSON.stringify(backlog, null, 2), "utf-8");
-}
-
-function parsePMOutput(pmOutput: string): Omit<BacklogIssue, "id" | "createdAt" | "updatedAt" | "completedAt" | "pipelineRun">[] {
-  const issues: Omit<BacklogIssue, "id" | "createdAt" | "updatedAt" | "completedAt" | "pipelineRun">[] = [];
-  const blocks = pmOutput
-    .split(/\n(?:---+|\*\*\*+)\n/)
-    .filter(b => b.includes("🎯 User Story") || b.includes("User Story"));
-
-  for (const block of blocks) {
-    // Try to extract title from # heading first
-    const h1Match = block.match(/^#\s+(.+?)$/m);
-    let title = h1Match ? h1Match[1].trim() : null;
-
-    // If no h1, try to extract from "je veux X afin de" pattern, handling multiline
-    if (!title) {
-      const userStoryMatch = block.match(/je\s+veux\s+(.+?)\s+(?:afin|pour)\s+de/is);
-      title = userStoryMatch ? userStoryMatch[1].trim().split('\n')[0] : null;
-    }
-
-    // Fallback
-    title = title || "Issue sans titre";
-
-    const priorityMatch = block.match(/## [🏷️\s]*Priorit[ée][^\n]*\n+\[?(MUST|SHOULD|COULD|WONT)\]?/i);
-    const priority = (priorityMatch?.[1]?.toUpperCase() ?? "SHOULD") as IssuePriority;
-
-    const sizeMatch = block.match(/## [📏\s]*Taille[^\n]*\n+\[?(S|M|L|XL)\]?/i);
-    const size = (sizeMatch?.[1]?.toUpperCase() ?? "M") as IssueSize;
-
-    issues.push({ title, description: block.trim(), status: "todo", priority, size });
-  }
-
-  return issues;
-}
-
-function generateIssueId(backlog: Backlog): string {
-  const maxNum = backlog.issues
-    .map(i => parseInt(i.id.replace("issue-", ""), 10))
-    .filter(n => !isNaN(n))
-    .reduce((a, b) => Math.max(a, b), 0);
-  return `issue-${String(maxNum + 1).padStart(3, "0")}`;
-}
-
-const PRIORITY_ORDER: Record<IssuePriority, number> = { MUST: 0, SHOULD: 1, COULD: 2, WONT: 3 };
-const SIZE_ORDER: Record<IssueSize, number> = { S: 0, M: 1, L: 2, XL: 3 };
-
-function pickNextIssue(backlog: Backlog): BacklogIssue | null {
-  const candidates = backlog.issues
-    .filter(i => i.status === "todo" && i.priority !== "WONT")
-    .sort((a, b) => {
-      const pd = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
-      if (pd !== 0) return pd;
-      return SIZE_ORDER[a.size] - SIZE_ORDER[b.size];
-    });
-  return candidates[0] ?? null;
 }
 
 function printBacklogSummary(backlog?: Backlog): void {
@@ -608,7 +438,7 @@ async function fullPipeline(brief: string, opts: { resumeFrom?: PipelineStep } =
   } else {
     while (!qaApproved && qaIteration < maxQAIterations) {
       qaIteration++;
-      console.log(`\n🧪 ÉTAPE 4/${maxQAIterations} — QA Engineer (itération ${qaIteration})`);
+      console.log(`\n🧪 ÉTAPE 4/5 — QA Engineer — itération ${qaIteration}/${maxQAIterations}`);
 
       const qaPrompt = qaIteration === 1
         ? "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité aux specs."
@@ -661,7 +491,7 @@ async function fullPipeline(brief: string, opts: { resumeFrom?: PipelineStep } =
 
   while (!securityApproved && rtIteration < maxRTIterations) {
     rtIteration++;
-    console.log(`\n🔴 ÉTAPE 5/${maxRTIterations} — Red Team (itération ${rtIteration})`);
+    console.log(`\n🔴 ÉTAPE 5/5 — Red Team — itération ${rtIteration}/${maxRTIterations}`);
 
     const rtPrompt = rtIteration === 1
       ? "Audite le code de la PR pour les vulnérabilités de sécurité."

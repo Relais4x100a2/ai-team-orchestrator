@@ -13,7 +13,7 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
 
 - TypeScript (Node.js) pour l'orchestrateur
 - Cursor SDK (@cursor/sdk) pour les agents
-- Modèles : `MODEL_STRONG` et `MODEL_FAST` dans `.env` (voir `AGENT_CONFIG` dans `src/orchestrator.ts`)
+- Modèles : `MODEL_STRONG` et `MODEL_FAST` dans `.env` (résolus dans `createAgentConfig()` / `src/agent-config.ts`, consommé par `src/orchestrator.ts`)
 - Projets **cibles** multiples (configuration via `projects/*.md`)
 
 ## Agents : clés CLI (`--role`) ⇄ fichier prompt
@@ -33,7 +33,7 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
 | `techwriter` | `technical-writer`                       |
 | `privacy`  | `privacy-by-design`                        |
 
-Ajouter ou renommer un agent : même nom de base pour la clé, le fichier `.md`, et la propriété `promptFile` dans `AGENT_CONFIG`.
+Ajouter ou renommer un agent : même nom de base pour la clé, le fichier `.md`, et l’entrée correspondante dans `AGENT_DEFINITIONS` (`src/agent-config.ts`). La CI vérifie leur présence avec `npm run verify:prompts`.
 
 ## Commandes utiles
 
@@ -41,6 +41,8 @@ Ajouter ou renommer un agent : même nom de base pour la clé, le fichier `.md`,
 npm install          # Dépendances
 npm run build        # tsc — compile le projet
 npx tsc --noEmit     # Vérification types sans écrire de fichiers (obligatoire avant changement TS)
+npm test             # Tests (backlog PM, verdicts pipeline) — `tsx --test`
+npm run verify:prompts  # Vérifie que tous les `src/prompts/*.md` référencés existent
 
 npm run start        # Aide interactive + liste des rôles (--role)
 
@@ -74,7 +76,11 @@ npm run project:dataset-style -- --role devops "Proposer CI pour le repo du fron
 
 ## Structure
 
-- `src/orchestrator.ts` — Script principal (`AGENT_CONFIG`, `fullPipeline`, `runAgent`)
+- `src/orchestrator.ts` — Script principal (`fullPipeline`, `runAgent`)
+- `src/agent-config.ts` — Définition des rôles, `promptFile`, résolution des modèles
+- `src/backlog.ts` — Parse sortie PM + sélection prochaine issue (`pickNextIssue`)
+- `src/pipeline-detection.ts` — Heuristiques `detectQAVerdict` / `detectSecurityVerdict`
+- `src/verify-prompts.ts` — Vérif présence des fichiers prompts (CI + `npm run verify:prompts`)
 - `src/prompts/*.md` — Prompts système génériques (liste dans le tableau ci-dessus)
 - `projects/*.md` — Fichiers de contexte projet (stack, conventions, contraintes)
 - `.cursor/mcp.json` — Serveurs MCP (Figma, GitHub)
