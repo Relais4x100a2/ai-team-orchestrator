@@ -594,16 +594,22 @@ async function fullPipeline(
     runStatus = "failed";
     throw e;
   } finally {
-    appendPipelineRun({
-      id: runId,
-      brief: briefForRecord,
-      resumeFrom: resumeFrom === "pm" ? null : resumeFrom,
-      qaIterations: qaIteration,
-      securityIterations: rtIteration,
-      status: runStatus,
-      startedAt,
-      finishedAt: new Date().toISOString(),
-    });
+    try {
+      appendPipelineRun({
+        id: runId,
+        brief: briefForRecord,
+        resumeFrom: resumeFrom === "pm" ? null : resumeFrom,
+        qaIterations: qaIteration,
+        securityIterations: rtIteration,
+        status: runStatus,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.error(
+        `   ⚠️  Impossible d'enregistrer l'exécution du pipeline dans pipeline-runs.json : ${(e as Error).message}`
+      );
+    }
   }
 }
 
