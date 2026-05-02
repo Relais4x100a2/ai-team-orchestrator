@@ -108,7 +108,7 @@ export function detectQAVerdict(qaReport: string): QAVerdict {
   if (fromLine) return fromLine;
 
   const section = extractQAVerdictSection(qaReport);
-  if (section && containsRequestChangesHaystack(section)) {
+  if (section && containsRequestChangesHaystack(stripMarkdownFencedCodeBlocks(section))) {
     return "REQUEST_CHANGES";
   }
 
