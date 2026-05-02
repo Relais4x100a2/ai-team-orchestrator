@@ -72,6 +72,8 @@ avec prévisualisation, validation des colonnes, et stockage en BDD"
 ```
 ai-team-orchestrator/
 ├── src/
+│   ├── models.ts             # 📐 Schéma backlog / pipeline (validation stricte)
+│   ├── pipeline-runs.ts      # 📝 Append des exécutions pipeline → pipeline-runs.json
 │   ├── orchestrator.ts       # 🧠 Script principal (le cerveau)
 │   ├── agent-config.ts       # 📋 Liste des prompts / résolution MODEL_*
 │   ├── backlog.ts            # 📦 Parse backlog & sélection « next » issue
@@ -91,6 +93,7 @@ ai-team-orchestrator/
 │       ├── release-manager.md
 │       ├── technical-writer.md
 │       └── privacy-by-design.md
+├── tests/                    # Tests unitaires (node:test + tsx)
 ├── projects/                 # 📂 Contexte spécifique par projet
 │   ├── dataset-style.md      # Exemple : Python + Streamlit + CapRover
 │   └── _template.md          # Template vide pour nouveau projet
@@ -105,8 +108,15 @@ ai-team-orchestrator/
 ├── package.json
 ├── tsconfig.json
 ├── backlog.json              # 📋 État du backlog (généré localement, non versionné)
+├── pipeline-runs.json        # 📜 Historique des exécutions `pipeline full` (local, non versionné)
 └── .env.example
 ```
+
+### Persistance locale (backlog & exécutions pipeline)
+
+- **`backlog.json`** : à chaque lecture, le contenu est validé (enums `status` / `priority` / `size`, dates ISO 8601, unicité des `id`). Un fichier corrompu ou mal typé provoque une erreur explicite plutôt qu’une corruption silencieuse.
+- **`pipeline-runs.json`** : chaque exécution de `npm run pipeline` (hors sous-commande `next`) ajoute une ligne d’historique avec `id`, brief (tronqué au-delà de ~50 ko), reprise éventuelle (`resumeFrom`), nombre d’itérations QA / Red Team, statut `success` | `partial` | `failed`, et horodatages.
+- **`pipeline:next`** : l’issue en cours reçoit `pipelineRun` = identifiant d’exécution (`run-<timestamp>-<suffix>`), réinitialisé si le pipeline échoue avant la fin.
 
 ## 🎯 Architecture multi-projets
 
