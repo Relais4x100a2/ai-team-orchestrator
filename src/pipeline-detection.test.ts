@@ -75,6 +75,11 @@ describe("detectQAVerdict", () => {
       "REQUEST_CHANGES"
     );
   });
+
+  it("ignore « changements requis » uniquement dans un bloc de code (scan corps)", () => {
+    const rapport = `### Verdict\nApprouvé, pas de blocage.\n\nExemple de liste :\n\`\`\`\nchangements requis sur le module fictif\n\`\`\``;
+    assert.strictEqual(detectQAVerdict(rapport), "APPROVE");
+  });
 });
 
 describe("extractQAVerdictSection", () => {

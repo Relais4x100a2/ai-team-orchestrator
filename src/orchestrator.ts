@@ -491,7 +491,7 @@ async function fullPipeline(brief: string, opts: { resumeFrom?: PipelineStep } =
 
   while (!securityApproved && rtIteration < maxRTIterations) {
     rtIteration++;
-    console.log(`\n🔴 ÉTAPE 5/${maxRTIterations} — Red Team (itération ${rtIteration})`);
+    console.log(`\n🔴 ÉTAPE 5/5 — Red Team — itération ${rtIteration}/${maxRTIterations}`);
 
     const rtPrompt = rtIteration === 1
       ? "Audite le code de la PR pour les vulnérabilités de sécurité."

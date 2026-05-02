@@ -2,8 +2,8 @@
  * Heuristiques minimales pour interpréter les rapports QA / Red Team dans le pipeline.
  *
  * Détection QA (bilingue) : ligne explicite `VERDICT: …`, bloc « ### … Verdict »,
- * puis motifs EN/FR répandus dans le corps du rapport (évite les faux positifs pour
- * certaines formulations négées en analysant préférentiellement le bloc verdict).
+ * puis motifs EN/FR dans le corps (hors blocs ```) — évite les faux positifs sur
+ * citations/code, et sur les formulations négées via l’analyse préférentielle du bloc verdict.
  */
 
 export type QAVerdict = "APPROVE" | "REQUEST_CHANGES";
@@ -11,6 +11,11 @@ export type QAVerdict = "APPROVE" | "REQUEST_CHANGES";
 export type SecurityVerdict = "APPROVED" | "CRITICAL_ISSUES" | "MEDIUM_ISSUES";
 
 const VERDICT_LINE = /^\s*VERDICT\s*[:：]\s*(.+)$/gim;
+
+/** Découpe Markdown (blocs ``` ... ```) pour le scan « corps complet » — évite les faux REQUEST_CHANGES dans citations / extraits de code. */
+function stripMarkdownFencedCodeBlocks(markdown: string): string {
+  return markdown.replace(/```[\s\S]*?```/g, " ");
+}
 
 function normalizeAccents(input: string): string {
   return input.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
@@ -108,14 +113,15 @@ export function detectQAVerdict(qaReport: string): QAVerdict {
   }
 
   const body = qaReport.trim();
+  const bodySansBlocsCode = stripMarkdownFencedCodeBlocks(body);
   if (
-    /\b\[?\s*(?:REQUEST_CHANGES)\s*\]?\b/i.test(body) ||
-    /\*\*\s*(?:REQUEST_CHANGES|REQUEST CHANGES)\s*\*\*/i.test(body)
+    /\b\[?\s*(?:REQUEST_CHANGES)\s*\]?\b/i.test(bodySansBlocsCode) ||
+    /\*\*\s*(?:REQUEST_CHANGES|REQUEST CHANGES)\s*\*\*/i.test(bodySansBlocsCode)
   ) {
     return "REQUEST_CHANGES";
   }
 
-  if (containsRequestChangesHaystack(body)) {
+  if (containsRequestChangesHaystack(bodySansBlocsCode)) {
     return "REQUEST_CHANGES";
   }
 
