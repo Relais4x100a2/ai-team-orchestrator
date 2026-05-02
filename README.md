@@ -61,12 +61,23 @@ npm run pipeline "Créer une fonctionnalité d'import de dataset CSV
 avec prévisualisation, validation des colonnes, et stockage en BDD"
 ```
 
+### 4. Vérifications locales (contributeurs)
+
+- `npx tsc --noEmit` — typage TypeScript (idem CI).
+- `npm test` — tests sur le parse backlog PM et les heuristiques QA / Red Team.
+- `npm run verify:prompts` — confirme la présence de tous les fichiers `src/prompts/*.md` référencés par les rôles agents.
+
 ## 📁 Structure du projet
 
 ```
 ai-team-orchestrator/
 ├── src/
 │   ├── orchestrator.ts       # 🧠 Script principal (le cerveau)
+│   ├── agent-config.ts       # 📋 Liste des prompts / résolution MODEL_*
+│   ├── backlog.ts            # 📦 Parse backlog & sélection « next » issue
+│   ├── pipeline-detection.ts # ✅ Heuristiques verdict QA / Red Team
+│   ├── verify-prompts.ts     # CI : vérifie la présence des fichiers prompts
+│   ├── *.test.ts             # Tests (runner `tsx --test`)
 │   └── prompts/              # 🎭 Prompts des agents (génériques)
 │       ├── product-manager.md
 │       ├── data-architect.md

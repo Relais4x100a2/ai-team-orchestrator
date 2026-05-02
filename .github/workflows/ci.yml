@@ -31,13 +31,7 @@ jobs:
       # Vérifie que le TypeScript compile sans erreur
       - run: npx tsc --noEmit
 
-      # Vérifie que tous les prompts référencés existent
-      - name: Vérifier les prompts
-        run: |
-          for prompt in product-manager data-architect ux-designer fullstack-dev qa-engineer red-team; do
-            if [ ! -f "src/prompts/${prompt}.md" ]; then
-              echo "❌ Prompt manquant : src/prompts/${prompt}.md"
-              exit 1
-            fi
-          done
-          echo "✅ Tous les prompts sont présents"
+      # Vérifie que tous les prompts référencés par AGENT_CONFIG existent
+      - run: npm run verify:prompts
+
+      - run: npm test

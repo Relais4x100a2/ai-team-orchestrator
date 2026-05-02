@@ -23,6 +23,8 @@
     "pipeline:next": "tsx src/orchestrator.ts --pipeline next",
     "pm:backlog": "tsx src/orchestrator.ts --pm-backlog",
     "backlog": "tsx src/orchestrator.ts --backlog",
+    "test": "tsx --test src/pipeline-detection.test.ts src/backlog.test.ts",
+    "verify:prompts": "tsx src/verify-prompts.ts",
     "project:dataset-style": "tsx src/orchestrator.ts --project projects/dataset-style.md"
   },
   "dependencies": {
