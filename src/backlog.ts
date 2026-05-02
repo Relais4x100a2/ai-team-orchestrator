@@ -30,7 +30,14 @@ export type ParsedIssueDraft = Omit<
   "id" | "createdAt" | "updatedAt" | "completedAt" | "pipelineRun"
 >;
 
-/** Extrait depuis la sortie texte du PM les user stories exploitables pour backlog.json. */
+/**
+ * Extrait depuis la sortie texte du PM les user stories exploitables pour backlog.json.
+ *
+ * Contrainte : le découpage repose sur des lignes ne contenant que `---` ou `***` comme
+ * séparateur entre les issues. Une ligne « --- » à **l'intérieur** d'une même story sera
+ * interprétée comme fin de bloc et peut fragmenter le parse (le PM doit donc éviter ces
+ * séparateurs horizontaux dans le corps d'une issue).
+ */
 export function parsePMOutput(pmOutput: string): ParsedIssueDraft[] {
   const issues: ParsedIssueDraft[] = [];
   const blocks = pmOutput

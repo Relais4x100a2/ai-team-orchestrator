@@ -438,7 +438,7 @@ async function fullPipeline(brief: string, opts: { resumeFrom?: PipelineStep } =
   } else {
     while (!qaApproved && qaIteration < maxQAIterations) {
       qaIteration++;
-      console.log(`\n🧪 ÉTAPE 4/${maxQAIterations} — QA Engineer (itération ${qaIteration})`);
+      console.log(`\n🧪 ÉTAPE 4/5 — QA Engineer — itération ${qaIteration}/${maxQAIterations}`);
 
       const qaPrompt = qaIteration === 1
         ? "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité aux specs."

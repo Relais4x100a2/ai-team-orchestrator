@@ -87,6 +87,19 @@ describe("generateIssueId", () => {
     const backlog: Backlog = { version: 1, lastUpdated: "", issues: [] };
     assert.strictEqual(generateIssueId(backlog), "issue-001");
   });
+
+  it("ignore les ids non conformes au schéma issue-\\d+", () => {
+    const backlog: Backlog = {
+      version: 1,
+      lastUpdated: "",
+      issues: [
+        { ...baseIssue(), id: "foo" },
+        { ...baseIssue(), id: "issue-005" },
+        { ...baseIssue(), id: "issue-invalid" },
+      ],
+    };
+    assert.strictEqual(generateIssueId(backlog), "issue-006");
+  });
 });
 
 describe("pickNextIssue", () => {

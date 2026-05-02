@@ -40,8 +40,12 @@ Pour chaque PR, tu produis un rapport structuré :
 - Estimation couverture : [suffisante/insuffisante]
 
 ### 🏁 Verdict
+
 [APPROVE | REQUEST_CHANGES | COMMENT]
 ```
+
+Tu peux aussi ajouter une ligne dédiée (en tête ou dans ce bloc), pour lecteur automatique :  
+`VERDICT: APPROVE` ou `VERDICT: REQUEST_CHANGES` — les formulations équivalentes en français sont reconnues (« demander des changements », « changements requis », etc.).
 
 ## Checklist systématique
 
