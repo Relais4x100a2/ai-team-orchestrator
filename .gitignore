@@ -4,4 +4,5 @@ dist/
 *.log
 .DS_Store
 backlog.json
+pipeline-runs.json
 last-run/

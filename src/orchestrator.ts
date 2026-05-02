@@ -37,6 +37,14 @@ import {
   pickNextIssue,
 } from "./backlog.js";
 import { detectQAVerdict, detectSecurityVerdict } from "./pipeline-detection.js";
+import type { ProjectContext, PipelineRunStatus } from "./models.js";
+import {
+  assertValidProjectContext,
+  newPipelineRunId,
+  parseBacklogJson,
+  resolveBriefFilePath,
+} from "./models.js";
+import { appendPipelineRun } from "./pipeline-runs.js";
 
 // Configure ripgrep path for local agent operations
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -45,12 +53,6 @@ if (existsSync(rgPath) && !process.env.RG_PATH) {
   process.env.RG_PATH = rgPath;
 }
 
-interface ProjectContext {
-  name: string;
-  repo: string;
-  branch: string;
-  content: string;
-}
 
 const BACKLOG_PATH = resolve(__dirname, "../backlog.json");
 let activeProject: ProjectContext | null = null;
@@ -76,12 +78,20 @@ function loadProject(filePath: string): ProjectContext {
   }
   const raw = readFileSync(fullPath, "utf-8");
   const { data, content } = matter(raw);
-  return {
-    name: data.name ?? "Projet sans nom",
-    repo: data.repo ?? process.env.TARGET_REPO_URL ?? "",
-    branch: data.branch ?? process.env.TARGET_BRANCH ?? "main",
+  const project: ProjectContext = {
+    name: typeof data.name === "string" ? data.name.trim() : "",
+    repo:
+      typeof data.repo === "string"
+        ? data.repo.trim()
+        : (process.env.TARGET_REPO_URL ?? "").trim(),
+    branch:
+      typeof data.branch === "string" && data.branch.trim()
+        ? data.branch.trim()
+        : (process.env.TARGET_BRANCH ?? "main").trim() || "main",
     content: content.trim(),
   };
+  assertValidProjectContext(project, fullPath);
+  return project;
 }
 
 /** Configuration des agents — modèles via MODEL_STRONG / MODEL_FAST dans .env */
@@ -219,7 +229,20 @@ function loadBacklog(): Backlog {
   if (!existsSync(BACKLOG_PATH)) {
     return { version: 1, lastUpdated: new Date().toISOString(), issues: [] };
   }
-  return JSON.parse(readFileSync(BACKLOG_PATH, "utf-8")) as Backlog;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(BACKLOG_PATH, "utf-8"));
+  } catch {
+    throw new Error(
+      "backlog.json : JSON invalide. Corrige le fichier ou supprime-le pour repartir d'un backlog vide."
+    );
+  }
+  try {
+    return parseBacklogJson(parsed);
+  } catch (e) {
+    const msg = (e as Error).message;
+    throw new Error(`backlog.json : ${msg}`);
+  }
 }
 
 function saveBacklog(backlog: Backlog): void {
@@ -328,11 +351,12 @@ async function pipelineNext() {
   // Mark in_progress
   issue.status = "in_progress";
   issue.updatedAt = new Date().toISOString();
-  issue.pipelineRun = new Date().toISOString();
+  const pipelineRunId = newPipelineRunId();
+  issue.pipelineRun = pipelineRunId;
   saveBacklog(backlog);
 
   try {
-    await fullPipeline(issue.description);
+    await fullPipeline(issue.description, { pipelineRunId });
 
     // Mark done (re-read backlog to avoid conflicts)
     const freshBacklog = loadBacklog();
@@ -348,6 +372,7 @@ async function pipelineNext() {
     const freshBacklog = loadBacklog();
     const freshIssue = freshBacklog.issues.find(i => i.id === issue.id)!;
     freshIssue.status = "todo";
+    freshIssue.pipelineRun = null;
     freshIssue.updatedAt = new Date().toISOString();
     saveBacklog(freshBacklog);
     throw err;
@@ -370,18 +395,34 @@ async function pipelineNext() {
  *
  * @param brief - Brief de départ (ou sortie d'étapes précédentes si resumeFrom est utilisé)
  * @param opts.resumeFrom - Reprendre depuis cette étape (les étapes antérieures sont ignorées)
+ * @param opts.pipelineRunId - Identifiant stable pour lier l'exécution au champ `pipelineRun` du backlog
  */
-async function fullPipeline(brief: string, opts: { resumeFrom?: PipelineStep } = {}) {
+async function fullPipeline(
+  brief: string,
+  opts: { resumeFrom?: PipelineStep; pipelineRunId?: string } = {}
+) {
   const resumeFrom = opts.resumeFrom ?? "pm";
   const startIdx = PIPELINE_STEPS.indexOf(resumeFrom);
+  const runId = opts.pipelineRunId ?? newPipelineRunId();
+  const startedAt = new Date().toISOString();
+  let qaIteration = 0;
+  let rtIteration = 0;
+  let qaEscalated = false;
+  let rtEscalated = false;
+  let mediumSecurityNotes = false;
+  let runStatus: PipelineRunStatus = "success";
 
-  console.log("═".repeat(60));
-  console.log("🏗️  PIPELINE COMPLET — Du brief au déploiement (avec feedback loop)");
-  if (resumeFrom !== "pm") {
-    console.log(`   ⏩ Reprise depuis : ${resumeFrom.toUpperCase()} (étapes précédentes ignorées)`);
-    console.log(`   📄 Contexte injecté depuis le brief fourni.`);
-  }
-  console.log("═".repeat(60));
+  const briefForRecord =
+    brief.length > 50_000 ? `${brief.slice(0, 50_000)}\n\n[… tronqué pour pipeline-runs.json …]` : brief;
+
+  try {
+    console.log("═".repeat(60));
+    console.log("🏗️  PIPELINE COMPLET — Du brief au déploiement (avec feedback loop)");
+    if (resumeFrom !== "pm") {
+      console.log(`   ⏩ Reprise depuis : ${resumeFrom.toUpperCase()} (étapes précédentes ignorées)`);
+      console.log(`   📄 Contexte injecté depuis le brief fourni.`);
+    }
+    console.log("═".repeat(60));
 
   // Quand on reprend depuis une étape intermédiaire, le brief joue le rôle
   // du contexte accumulé des étapes précédentes.
@@ -429,7 +470,6 @@ async function fullPipeline(brief: string, opts: { resumeFrom?: PipelineStep } =
 
   // Boucle QA avec feedback
   let qaApproved = startIdx > 3; // si on reprend depuis redteam, QA est déjà passé
-  let qaIteration = 0;
   const maxQAIterations = 3;
   let qaReport = "";
 
@@ -478,6 +518,7 @@ async function fullPipeline(brief: string, opts: { resumeFrom?: PipelineStep } =
         );
       } else {
         console.log("⚠️  QA N'A PAS APPROUVÉ APRÈS 3 ITÉRATIONS — Passage malgré tout (escalade manuelle recommandée).\n");
+        qaEscalated = true;
         qaApproved = true;
       }
     }
@@ -485,7 +526,6 @@ async function fullPipeline(brief: string, opts: { resumeFrom?: PipelineStep } =
 
   // ── Étape 5 : Red Team avec boucle feedback ──
   let securityApproved = false;
-  let rtIteration = 0;
   const maxRTIterations = 3;
   let securityReport = "";
 
@@ -524,17 +564,23 @@ async function fullPipeline(brief: string, opts: { resumeFrom?: PipelineStep } =
         }
       );
     } else if (securityVerdict === "MEDIUM_ISSUES") {
+      mediumSecurityNotes = true;
       securityApproved = true;
       console.log("⚠️  VULNÉRABILITÉS MOYENNES IDENTIFIÉES — Passage avec documentation.\n");
       console.log("   Note : Les vulnérabilités moyennes doivent être traitées dans les sprints suivants.\n");
     } else {
       console.log("⚠️  AUDIT DE SÉCURITÉ N'A PAS APPROUVÉ APRÈS 3 ITÉRATIONS — Passage malgré tout (escalade manuelle recommandée).\n");
+      rtEscalated = true;
       securityApproved = true;
     }
   }
 
   // ── Résumé final ──
   const skipped = (step: PipelineStep) => PIPELINE_STEPS.indexOf(step) < startIdx;
+  if (qaEscalated || rtEscalated || mediumSecurityNotes) {
+    runStatus = "partial";
+  }
+
   console.log("\n" + "═".repeat(60));
   console.log("📊 PIPELINE TERMINÉ — Résumé");
   console.log("═".repeat(60));
@@ -544,6 +590,27 @@ async function fullPipeline(brief: string, opts: { resumeFrom?: PipelineStep } =
   console.log(`4. Review QA         : ${skipped("qa") ? "⏭  ignoré" : `✅ approuvée (${qaIteration} itération${qaIteration > 1 ? "s" : ""})`}`);
   console.log(`5. Audit sécurité    : ✅ complété (${rtIteration} itération${rtIteration > 1 ? "s" : ""})`);
   console.log("\n👉 Va sur GitHub pour review final et merger la PR.");
+  } catch (e) {
+    runStatus = "failed";
+    throw e;
+  } finally {
+    try {
+      appendPipelineRun({
+        id: runId,
+        brief: briefForRecord,
+        resumeFrom: resumeFrom === "pm" ? null : resumeFrom,
+        qaIterations: qaIteration,
+        securityIterations: rtIteration,
+        status: runStatus,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.error(
+        `   ⚠️  Impossible d'enregistrer l'exécution du pipeline dans pipeline-runs.json : ${(e as Error).message}`
+      );
+    }
+  }
 }
 
 // ------------------------------------------------------------
@@ -581,13 +648,11 @@ async function main() {
   let briefFromFile: string | null = null;
   const briefFileFlag = args.indexOf("--brief-file");
   if (briefFileFlag !== -1 && args[briefFileFlag + 1]) {
-    const briefFilePath = resolve(process.cwd(), args[briefFileFlag + 1]);
-    // LFI guard : refuser tout chemin qui sort du répertoire courant
-    if (!briefFilePath.startsWith(resolve(process.cwd()) + "/")) {
-      console.error(
-        "❌ --brief-file : chemin non autorisé.\n" +
-        "   Seuls les fichiers dans le dossier courant sont acceptés."
-      );
+    let briefFilePath: string;
+    try {
+      briefFilePath = resolveBriefFilePath(args[briefFileFlag + 1], process.cwd());
+    } catch (e) {
+      console.error(`❌ --brief-file : ${(e as Error).message}`);
       process.exit(1);
     }
     if (!existsSync(briefFilePath)) {
@@ -595,7 +660,7 @@ async function main() {
       process.exit(1);
     }
     briefFromFile = readFileSync(briefFilePath, "utf-8").trim();
-    console.log(`📄 Brief chargé depuis : ${args[briefFileFlag + 1]}`);
+    console.log(`📄 Brief chargé depuis : ${briefFilePath}`);
   }
 
   // --resume-from : reprendre le pipeline à une étape donnée
@@ -669,6 +734,9 @@ Usage :
   npm run backlog
     → Affiche l'état du backlog (todo/in_progress/done)
 
+  npm test
+    → Exécute les tests unitaires (validation backlog.json côté modèle)
+
   npm run pipeline:next
     → Prend la prochaine issue MUST→SHOULD→COULD et lance le pipeline complet
 
@@ -682,6 +750,7 @@ Options globales :
 
   --brief-file <file>
     → Lit le brief/tâche depuis un fichier plutôt que depuis la CLI
+    → Chemin relatif au répertoire courant ou chemin absolu
     → Permet de passer de longs textes (ex: last-run/pm.md comme brief pour l'architecte)
     → Compatible avec --role, --pipeline
 
