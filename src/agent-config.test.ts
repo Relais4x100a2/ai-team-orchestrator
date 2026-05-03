@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { createAgentConfig, expectedPromptBasenames } from "./agent-config.js";
+import {
+  createAgentConfig,
+  expectedPromptBasenames,
+  formatModelSelection,
+} from "./agent-config.js";
 
 describe("expectedPromptBasenames", () => {
   it("est triée et sans doublon (une entrée par promptFile distinct)", () => {
@@ -21,33 +25,68 @@ describe("expectedPromptBasenames", () => {
 });
 
 describe("createAgentConfig", () => {
-  it("utilise MODEL_STRONG / MODEL_FAST quand défini après trim et applique défaut sinon", () => {
-    const cfg = createAgentConfig({
-      MODEL_STRONG: "  strong-model ",
-      MODEL_FAST: "fast-model",
-    });
-    assert.strictEqual(cfg.pm.model, "strong-model");
-    assert.strictEqual(cfg.qa.model, "fast-model");
-    assert.strictEqual(cfg.architect.model, "strong-model");
-    assert.strictEqual(cfg.dev.model, "fast-model");
+  it("retourne les défauts codés (id + params) quand aucun env n'est défini", () => {
+    const cfg = createAgentConfig({});
+    assert.strictEqual(cfg.pm.model.id, "claude-sonnet-4-6");
+    assert.ok(Array.isArray(cfg.pm.model.params) && cfg.pm.model.params!.length > 0);
+    assert.strictEqual(cfg.dev.model.id, "composer-2");
+    assert.strictEqual(cfg.redteam.model.id, "claude-sonnet-4-6");
   });
 
-  it("retombe aux modèles par défaut pour chaîne vide après trim ou absentes", () => {
-    const emptyTrim = createAgentConfig({
-      MODEL_STRONG: "   ",
-      MODEL_FAST: "\t",
-    });
-    assert.strictEqual(emptyTrim.pm.model, "gpt-5-mini");
-    assert.strictEqual(emptyTrim.qa.model, "composer-2");
-
-    const omitted = createAgentConfig({});
-    assert.strictEqual(omitted.pm.model, "gpt-5-mini");
-    assert.strictEqual(omitted.qa.model, "composer-2");
+  it("MODEL_<ROLE> surcharge le modèle d'un rôle précis (sans params)", () => {
+    const cfg = createAgentConfig({ MODEL_PM: "gpt-5.5", MODEL_DEV: "composer-2" });
+    assert.strictEqual(cfg.pm.model.id, "gpt-5.5");
+    assert.strictEqual(cfg.pm.model.params, undefined);
+    assert.strictEqual(cfg.dev.model.id, "composer-2");
+    assert.strictEqual(cfg.architect.model.id, "claude-sonnet-4-6");
   });
 
-  it("expose toujours tous les champs prompts / description par rôle", () => {
+  it("MODEL_STRONG surcharge tous les rôles « strong » si aucun override par rôle", () => {
+    const cfg = createAgentConfig({ MODEL_STRONG: "gpt-5.5" });
+    assert.strictEqual(cfg.pm.model.id, "gpt-5.5");
+    assert.strictEqual(cfg.architect.model.id, "gpt-5.5");
+    assert.strictEqual(cfg.redteam.model.id, "gpt-5.5");
+    assert.strictEqual(cfg.dev.model.id, "composer-2");
+  });
+
+  it("MODEL_FAST surcharge tous les rôles « fast » si aucun override par rôle", () => {
+    const cfg = createAgentConfig({ MODEL_FAST: "claude-haiku-4-5" });
+    assert.strictEqual(cfg.dev.model.id, "claude-haiku-4-5");
+    assert.strictEqual(cfg.qa.model.id, "claude-haiku-4-5");
+    assert.strictEqual(cfg.pm.model.id, "claude-sonnet-4-6");
+  });
+
+  it("MODEL_<ROLE> a priorité sur MODEL_STRONG/MODEL_FAST", () => {
+    const cfg = createAgentConfig({ MODEL_STRONG: "gpt-5.5", MODEL_PM: "claude-opus-4-7" });
+    assert.strictEqual(cfg.pm.model.id, "claude-opus-4-7");
+    assert.strictEqual(cfg.architect.model.id, "gpt-5.5");
+  });
+
+  it("chaîne vide ou whitespace dans env vars est ignoré (retombe au défaut)", () => {
+    const cfg = createAgentConfig({ MODEL_STRONG: "   ", MODEL_PM: "\t" });
+    assert.strictEqual(cfg.pm.model.id, "claude-sonnet-4-6");
+    assert.strictEqual(cfg.architect.model.id, "claude-sonnet-4-6");
+  });
+
+  it("expose toujours tous les champs promptFile / description par rôle", () => {
     const cfg = createAgentConfig({});
     assert.strictEqual(cfg.pm.promptFile, "product-manager");
     assert.ok(cfg.redteam.description.length > 0);
+  });
+});
+
+describe("formatModelSelection", () => {
+  it("retourne juste l'id quand pas de params", () => {
+    assert.strictEqual(formatModelSelection({ id: "gpt-5.5" }), "gpt-5.5");
+  });
+
+  it("affiche l'id et les params entre parenthèses", () => {
+    assert.strictEqual(
+      formatModelSelection({
+        id: "claude-sonnet-4-6",
+        params: [{ id: "thinking", value: "true" }, { id: "effort", value: "high" }],
+      }),
+      "claude-sonnet-4-6 (thinking:true, effort:high)"
+    );
   });
 });

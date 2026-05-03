@@ -26,10 +26,13 @@ import { fileURLToPath } from "url";
 import matter from "gray-matter";
 import {
   createAgentConfig,
+  formatModelSelection,
+  FRUGAL_MODEL,
   PIPELINE_STEPS,
   type AgentRole,
   type PipelineStep,
 } from "./agent-config.js";
+import { checkFrugalMode } from "./spend-guard.js";
 import type { Backlog, BacklogIssue, IssuePriority, IssueStatus } from "./backlog.js";
 import {
   generateIssueId,
@@ -172,13 +175,20 @@ async function runAgent(
     autoCreatePR?: boolean;
     /** Contexte additionnel à injecter (ex: résultat d'un agent précédent) */
     additionalContext?: string;
+    /** true = forcer composer-2 (seuil de dépenses atteint) */
+    frugal?: boolean;
   } = {}
 ) {
   const config = AGENT_CONFIG[role];
+  const model = options.frugal ? FRUGAL_MODEL : config.model;
   const prompt = loadPrompt(config.promptFile);
 
   console.log(`\n🚀 Lancement de l'agent : ${config.description}`);
-  console.log(`   Modèle : ${config.model}`);
+  if (options.frugal) {
+    console.log(`   Modèle : ${formatModelSelection(model)} ⚠️ mode frugal`);
+  } else {
+    console.log(`   Modèle : ${formatModelSelection(model)}`);
+  }
   console.log(`   Mode : ${options.cloud ? "☁️  Cloud" : "💻 Local"}`);
   console.log(`   Tâche : ${previewText(task)}`);
   console.log("─".repeat(60));
@@ -198,7 +208,7 @@ async function runAgent(
   // Création de l'agent
   const agentOptions: Parameters<typeof Agent.create>[0] = {
     apiKey: process.env.CURSOR_API_KEY!,
-    model: { id: config.model },
+    model,
   };
 
   // Mode cloud ou local
@@ -227,7 +237,7 @@ async function runAgent(
   try {
     agent = await Agent.create(agentOptions);
   } catch (e) {
-    throw new Error(`Impossible de créer l'agent ${role} (${config.model}) : ${formatErrorMessage(e)}`);
+    throw new Error(`Impossible de créer l'agent ${role} (${model.id}) : ${formatErrorMessage(e)}`);
   }
   const roleAndTask = `${prompt}\n\n---\n\n${fullTask}`;
   const taskWithSystemPrompt = projectSection ? `${projectSection}\n\n---\n\n${roleAndTask}` : roleAndTask;
@@ -452,6 +462,16 @@ async function fullPipeline(
   const startIdx = PIPELINE_STEPS.indexOf(resumeFrom);
   const runId = opts.pipelineRunId ?? newPipelineRunId();
   const startedAt = new Date().toISOString();
+
+  // Vérification du budget avant de lancer les agents
+  const frugal = await checkFrugalMode(process.env);
+  if (frugal) {
+    console.warn(
+      "\n⚠️  MODE FRUGAL — Seuil de dépenses atteint (SPEND_ALERT_CENTS).\n" +
+      "   Tous les agents utiliseront composer-2 pour ce run.\n"
+    );
+  }
+
   let qaIteration = 0;
   let rtIteration = 0;
   let qaEscalated = false;
@@ -479,7 +499,7 @@ async function fullPipeline(
   // ── Étape 1 : Product Manager ──
   if (startIdx === 0) {
     console.log("\n📋 ÉTAPE 1/5 — Product Manager");
-    specs = await runAgent("pm", brief);
+    specs = await runAgent("pm", brief, { frugal });
     console.log("⏸️  CHECKPOINT : Review les specs ci-dessus.");
     console.log("   En production, le pipeline s'arrête ici pour ta validation.\n");
   } else {
@@ -492,7 +512,7 @@ async function fullPipeline(
     architecture = await runAgent(
       "architect",
       "Conçois l'architecture technique et le modèle de données pour les specs suivantes.",
-      { additionalContext: specs }
+      { additionalContext: specs, frugal }
     );
     console.log("⏸️  CHECKPOINT : Review l'architecture ci-dessus.\n");
   } else {
@@ -511,7 +531,7 @@ async function fullPipeline(
     ? await runAgent(
         "dev",
         "Implémente les fonctionnalités selon les specs et l'architecture ci-dessous. Crée une branche feature/ et ouvre une PR.",
-        { additionalContext: devContext, cloud: true, autoCreatePR: true }
+        { additionalContext: devContext, cloud: true, autoCreatePR: true, frugal }
       )
     : brief; // si on reprend depuis QA ou redteam, le brief est le contexte de l'implémentation
 
@@ -543,6 +563,7 @@ async function fullPipeline(
         {
           additionalContext: qaAdditionalContext,
           cloud: true,
+          frugal,
         }
       );
 
@@ -561,6 +582,7 @@ async function fullPipeline(
             additionalContext: devContext,
             cloud: true,
             autoCreatePR: false,
+            frugal,
           }
         );
       } else {
@@ -590,6 +612,7 @@ async function fullPipeline(
       {
         additionalContext: implementation,
         cloud: true,
+        frugal,
       }
     );
 
@@ -608,6 +631,7 @@ async function fullPipeline(
           additionalContext: devContext,
           cloud: true,
           autoCreatePR: false,
+          frugal,
         }
       );
     } else if (securityVerdict === "MEDIUM_ISSUES") {
@@ -741,8 +765,9 @@ async function main() {
       process.exit(1);
     }
 
+    const frugal = await checkFrugalMode(process.env);
     // Use cloud mode for direct agent invocation
-    await runAgent(role, task, { cloud: true });
+    await runAgent(role, task, { cloud: true, frugal });
   } else if (pipelineFlag !== -1) {
     // Mode pipeline : npm run pipeline [next|full|"Mon brief"]
     const subcommand = args[pipelineFlag + 1];
