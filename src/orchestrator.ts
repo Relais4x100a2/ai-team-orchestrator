@@ -21,7 +21,7 @@
 import "dotenv/config";
 import { Agent } from "@cursor/sdk";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { resolve, dirname, isAbsolute, relative } from "path";
+import { resolve, dirname, basename, isAbsolute, relative } from "path";
 import { fileURLToPath } from "url";
 import matter from "gray-matter";
 import {
@@ -59,6 +59,7 @@ if (existsSync(rgPath) && !process.env.RG_PATH) {
 
 const BACKLOG_PATH = resolve(__dirname, "../backlog.json");
 let activeProject: ProjectContext | null = null;
+let activeProjectSlug: string | null = null;
 
 // ------------------------------------------------------------
 // Configuration
@@ -132,7 +133,12 @@ function loadProject(filePath: string): ProjectContext {
 /** Configuration des agents — modèles via MODEL_STRONG / MODEL_FAST dans .env */
 const AGENT_CONFIG = createAgentConfig();
 
-const LAST_RUN_DIR = resolve(__dirname, "../last-run");
+const LAST_RUN_BASE_DIR = resolve(__dirname, "../last-run");
+
+function resolveLastRunDir(): string {
+  if (activeProjectSlug) return resolve(LAST_RUN_BASE_DIR, activeProjectSlug);
+  return LAST_RUN_BASE_DIR;
+}
 
 /** URL du repo cible pour le mode cloud : projet actif ou .env */
 function resolveRepoUrl(): string | undefined {
@@ -268,11 +274,13 @@ async function runAgent(
   // ignorée : outil local mono-utilisateur).
   if (result) {
     try {
-      mkdirSync(LAST_RUN_DIR, { recursive: true });
-      writeFileSync(resolve(LAST_RUN_DIR, `${role}.md`), result, "utf-8");
-      console.log(`\n   💾 Sortie sauvegardée : last-run/${role}.md`);
+      const lastRunDir = resolveLastRunDir();
+      mkdirSync(lastRunDir, { recursive: true });
+      writeFileSync(resolve(lastRunDir, `${role}.md`), result, "utf-8");
+      const relPath = activeProjectSlug ? `last-run/${activeProjectSlug}/${role}.md` : `last-run/${role}.md`;
+      console.log(`\n   💾 Sortie sauvegardée : ${relPath}`);
     } catch (e) {
-      console.error(`   ⚠️  Impossible de sauvegarder last-run/${role}.md : ${(e as Error).message}`);
+      console.error(`   ⚠️  Impossible de sauvegarder la sortie last-run : ${(e as Error).message}`);
     }
   }
 
@@ -709,6 +717,10 @@ async function main() {
       process.exit(1);
     }
     activeProject = loadProject(projectPath);
+    activeProjectSlug = basename(projectPath, ".md")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || null;
     console.log(`🎯 Projet : ${activeProject.name} (${activeProject.branch})`);
     // Surcharger les variables d'environnement avec les valeurs du projet
     if (activeProject.repo) process.env.TARGET_REPO_URL = activeProject.repo;
