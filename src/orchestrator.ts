@@ -147,7 +147,7 @@ function requireRepoUrlForCloud(cloud?: boolean): void {
   if (!resolveRepoUrl()) {
     console.error(
       "❌ Mode cloud : un dépôt Git cible est obligatoire.\n" +
-        "   Passe --project projects/<fichier>.md (frontmatter avec `repo`) ou définit TARGET_REPO_URL dans .env."
+        "   Passe --project projects/<fichier>.md (frontmatter avec `repo:`)."
     );
     process.exit(1);
   }
@@ -352,7 +352,7 @@ async function pmBacklogWorkflow() {
   if (!repoUrl) {
     console.error(
       "❌ PM backlog (mode cloud) : dépôt cible inconnu.\n" +
-        "   Utilise --project avec un fichier contenant `repo:` ou définis TARGET_REPO_URL dans .env."
+        "   Utilise --project projects/<fichier>.md (frontmatter avec `repo:`)."
     );
     process.exit(1);
   }
