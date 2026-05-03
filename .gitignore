@@ -6,3 +6,5 @@ dist/
 backlog.json
 pipeline-runs.json
 last-run/
+projects/*.md
+!projects/_template.md
