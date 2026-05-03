@@ -273,14 +273,17 @@ async function runAgent(
   // sur le même rôle s'écrase mutuellement (race condition intentionnellement
   // ignorée : outil local mono-utilisateur).
   if (result) {
-    try {
-      const lastRunDir = resolveLastRunDir();
-      mkdirSync(lastRunDir, { recursive: true });
-      writeFileSync(resolve(lastRunDir, `${role}.md`), result, "utf-8");
-      const relPath = activeProjectSlug ? `last-run/${activeProjectSlug}/${role}.md` : `last-run/${role}.md`;
-      console.log(`\n   💾 Sortie sauvegardée : ${relPath}`);
-    } catch (e) {
-      console.error(`   ⚠️  Impossible de sauvegarder la sortie last-run : ${(e as Error).message}`);
+    if (!activeProjectSlug) {
+      console.log(`\n   ℹ️  Sortie non sauvegardée (pas de --project). Passe --project projects/<fichier>.md pour activer last-run/<slug>/${role}.md.`);
+    } else {
+      try {
+        const lastRunDir = resolveLastRunDir();
+        mkdirSync(lastRunDir, { recursive: true });
+        writeFileSync(resolve(lastRunDir, `${role}.md`), result, "utf-8");
+        console.log(`\n   💾 Sortie sauvegardée : last-run/${activeProjectSlug}/${role}.md`);
+      } catch (e) {
+        console.error(`   ⚠️  Impossible de sauvegarder la sortie last-run : ${(e as Error).message}`);
+      }
     }
   }
 
