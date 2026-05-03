@@ -21,7 +21,7 @@
 import "dotenv/config";
 import { Agent } from "@cursor/sdk";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { resolve, dirname } from "path";
+import { resolve, dirname, isAbsolute, relative } from "path";
 import { fileURLToPath } from "url";
 import matter from "gray-matter";
 import {
@@ -61,6 +61,24 @@ let activeProject: ProjectContext | null = null;
 // Configuration
 // ------------------------------------------------------------
 
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function previewText(text: string, maxLength = 120): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  return compact.length <= maxLength ? compact : `${compact.slice(0, maxLength - 1)}…`;
+}
+
+function resolveUserPath(inputPath: string): { absolutePath: string; displayPath: string } {
+  const trimmed = inputPath.trim();
+  if (!trimmed) throw new Error("Chemin vide.");
+  const absolutePath = isAbsolute(trimmed) ? trimmed : resolve(process.cwd(), trimmed);
+  const rel = relative(process.cwd(), absolutePath);
+  const isInside = !rel.startsWith("..") && !isAbsolute(rel);
+  return { absolutePath, displayPath: isInside ? (rel || ".") : absolutePath };
+}
+
 /** Charge un fichier prompt depuis src/prompts/ */
 function loadPrompt(role: string): string {
   const path = resolve(__dirname, "prompts", `${role}.md`);
@@ -72,25 +90,39 @@ function loadPrompt(role: string): string {
 
 /** Charge un fichier projet depuis projects/ avec frontmatter YAML */
 function loadProject(filePath: string): ProjectContext {
-  const fullPath = resolve(process.cwd(), filePath);
-  if (!existsSync(fullPath)) {
-    throw new Error(`Projet introuvable : ${fullPath}`);
+  const { absolutePath, displayPath } = resolveUserPath(filePath);
+  if (!existsSync(absolutePath)) {
+    throw new Error(`Projet introuvable : ${displayPath}`);
   }
-  const raw = readFileSync(fullPath, "utf-8");
-  const { data, content } = matter(raw);
+  let raw: string;
+  try {
+    raw = readFileSync(absolutePath, "utf-8");
+  } catch (e) {
+    throw new Error(`Impossible de lire le projet ${displayPath} : ${formatErrorMessage(e)}`);
+  }
+  let parsed: ReturnType<typeof matter>;
+  try {
+    parsed = matter(raw);
+  } catch (e) {
+    throw new Error(`Frontmatter invalide dans ${displayPath} : ${formatErrorMessage(e)}`);
+  }
+  const data = parsed.data as Record<string, unknown>;
+  if (data.name !== undefined && typeof data.name !== "string") {
+    throw new Error(`Frontmatter "name" invalide dans ${displayPath} : chaîne attendue.`);
+  }
+  if (data.repo !== undefined && typeof data.repo !== "string") {
+    throw new Error(`Frontmatter "repo" invalide dans ${displayPath} : chaîne attendue.`);
+  }
+  if (data.branch !== undefined && typeof data.branch !== "string") {
+    throw new Error(`Frontmatter "branch" invalide dans ${displayPath} : chaîne attendue.`);
+  }
   const project: ProjectContext = {
-    name: typeof data.name === "string" ? data.name.trim() : "",
-    repo:
-      typeof data.repo === "string"
-        ? data.repo.trim()
-        : (process.env.TARGET_REPO_URL ?? "").trim(),
-    branch:
-      typeof data.branch === "string" && data.branch.trim()
-        ? data.branch.trim()
-        : (process.env.TARGET_BRANCH ?? "main").trim() || "main",
-    content: content.trim(),
+    name: typeof data.name === "string" && data.name.trim() ? data.name.trim() : "Projet sans nom",
+    repo: typeof data.repo === "string" && data.repo.trim() ? data.repo.trim() : (process.env.TARGET_REPO_URL ?? "").trim(),
+    branch: typeof data.branch === "string" && data.branch.trim() ? data.branch.trim() : (process.env.TARGET_BRANCH ?? "main").trim() || "main",
+    content: parsed.content.trim(),
   };
-  assertValidProjectContext(project, fullPath);
+  assertValidProjectContext(project, absolutePath);
   return project;
 }
 
@@ -148,7 +180,7 @@ async function runAgent(
   console.log(`\n🚀 Lancement de l'agent : ${config.description}`);
   console.log(`   Modèle : ${config.model}`);
   console.log(`   Mode : ${options.cloud ? "☁️  Cloud" : "💻 Local"}`);
-  console.log(`   Tâche : ${task.substring(0, 80)}...`);
+  console.log(`   Tâche : ${previewText(task)}`);
   console.log("─".repeat(60));
 
   // Construction du message avec le contexte
@@ -191,13 +223,28 @@ async function runAgent(
     });
   }
 
-  const agent = await Agent.create(agentOptions);
+  let agent;
+  try {
+    agent = await Agent.create(agentOptions);
+  } catch (e) {
+    throw new Error(`Impossible de créer l'agent ${role} (${config.model}) : ${formatErrorMessage(e)}`);
+  }
   const roleAndTask = `${prompt}\n\n---\n\n${fullTask}`;
   const taskWithSystemPrompt = projectSection ? `${projectSection}\n\n---\n\n${roleAndTask}` : roleAndTask;
-  const run = await agent.send(taskWithSystemPrompt);
+  let run;
+  try {
+    run = await agent.send(taskWithSystemPrompt);
+  } catch (e) {
+    throw new Error(`Échec de l'envoi de la tâche à l'agent ${role} : ${formatErrorMessage(e)}`);
+  }
 
   // Attendre la fin et afficher le résultat
-  const runResult = await run.wait();
+  let runResult;
+  try {
+    runResult = await run.wait();
+  } catch (e) {
+    throw new Error(`L'agent ${role} n'a pas terminé correctement : ${formatErrorMessage(e)}`);
+  }
   if (runResult.result) {
     console.log(runResult.result);
   } else {
@@ -659,8 +706,9 @@ async function main() {
       console.error(`❌ --brief-file : fichier introuvable : ${briefFilePath}`);
       process.exit(1);
     }
+    const { displayPath: briefDisplay } = resolveUserPath(briefFilePath);
     briefFromFile = readFileSync(briefFilePath, "utf-8").trim();
-    console.log(`📄 Brief chargé depuis : ${briefFilePath}`);
+    console.log(`📄 Brief chargé depuis : ${briefDisplay}`);
   }
 
   // --resume-from : reprendre le pipeline à une étape donnée
