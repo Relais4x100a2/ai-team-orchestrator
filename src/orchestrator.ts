@@ -57,7 +57,12 @@ if (existsSync(rgPath) && !process.env.RG_PATH) {
 }
 
 
-const BACKLOG_PATH = resolve(__dirname, "../backlog.json");
+const BACKLOG_FALLBACK_PATH = resolve(__dirname, "../backlog.json");
+
+function resolveBacklogPath(): string {
+  if (activeProjectSlug) return resolve(resolveLastRunDir(), "backlog.json");
+  return BACKLOG_FALLBACK_PATH;
+}
 let activeProject: ProjectContext | null = null;
 let activeProjectSlug: string | null = null;
 
@@ -306,12 +311,12 @@ async function runAgent(
 }
 
 function loadBacklog(): Backlog {
-  if (!existsSync(BACKLOG_PATH)) {
+  if (!existsSync(resolveBacklogPath())) {
     return { version: 1, lastUpdated: new Date().toISOString(), issues: [] };
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(BACKLOG_PATH, "utf-8"));
+    parsed = JSON.parse(readFileSync(resolveBacklogPath(), "utf-8"));
   } catch {
     throw new Error(
       "backlog.json : JSON invalide. Corrige le fichier ou supprime-le pour repartir d'un backlog vide."
@@ -327,7 +332,9 @@ function loadBacklog(): Backlog {
 
 function saveBacklog(backlog: Backlog): void {
   backlog.lastUpdated = new Date().toISOString();
-  writeFileSync(BACKLOG_PATH, JSON.stringify(backlog, null, 2), "utf-8");
+  const path = resolveBacklogPath();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(backlog, null, 2), "utf-8");
 }
 
 function printBacklogSummary(backlog?: Backlog): void {
