@@ -27,10 +27,10 @@ describe("expectedPromptBasenames", () => {
 describe("createAgentConfig", () => {
   it("retourne les défauts codés (id + params) quand aucun env n'est défini", () => {
     const cfg = createAgentConfig({});
-    assert.strictEqual(cfg.pm.model.id, "claude-sonnet-4-6");
+    assert.strictEqual(cfg.pm.model.id, "claude-sonnet-4-5");
     assert.ok(Array.isArray(cfg.pm.model.params) && cfg.pm.model.params!.length > 0);
     assert.strictEqual(cfg.dev.model.id, "composer-2");
-    assert.strictEqual(cfg.redteam.model.id, "claude-sonnet-4-6");
+    assert.strictEqual(cfg.redteam.model.id, "composer-2");
   });
 
   it("MODEL_<ROLE> surcharge le modèle d'un rôle précis (sans params)", () => {
@@ -38,7 +38,7 @@ describe("createAgentConfig", () => {
     assert.strictEqual(cfg.pm.model.id, "gpt-5.5");
     assert.strictEqual(cfg.pm.model.params, undefined);
     assert.strictEqual(cfg.dev.model.id, "composer-2");
-    assert.strictEqual(cfg.architect.model.id, "claude-sonnet-4-6");
+    assert.strictEqual(cfg.architect.model.id, "claude-sonnet-4-5");
   });
 
   it("MODEL_STRONG surcharge tous les rôles « strong » si aucun override par rôle", () => {
@@ -53,7 +53,7 @@ describe("createAgentConfig", () => {
     const cfg = createAgentConfig({ MODEL_FAST: "claude-haiku-4-5" });
     assert.strictEqual(cfg.dev.model.id, "claude-haiku-4-5");
     assert.strictEqual(cfg.qa.model.id, "claude-haiku-4-5");
-    assert.strictEqual(cfg.pm.model.id, "claude-sonnet-4-6");
+    assert.strictEqual(cfg.pm.model.id, "claude-sonnet-4-5");
   });
 
   it("MODEL_<ROLE> a priorité sur MODEL_STRONG/MODEL_FAST", () => {
@@ -64,8 +64,8 @@ describe("createAgentConfig", () => {
 
   it("chaîne vide ou whitespace dans env vars est ignoré (retombe au défaut)", () => {
     const cfg = createAgentConfig({ MODEL_STRONG: "   ", MODEL_PM: "\t" });
-    assert.strictEqual(cfg.pm.model.id, "claude-sonnet-4-6");
-    assert.strictEqual(cfg.architect.model.id, "claude-sonnet-4-6");
+    assert.strictEqual(cfg.pm.model.id, "claude-sonnet-4-5");
+    assert.strictEqual(cfg.architect.model.id, "claude-sonnet-4-5");
   });
 
   it("expose toujours tous les champs promptFile / description par rôle", () => {
@@ -83,10 +83,10 @@ describe("formatModelSelection", () => {
   it("affiche l'id et les params entre parenthèses", () => {
     assert.strictEqual(
       formatModelSelection({
-        id: "claude-sonnet-4-6",
+        id: "claude-sonnet-4-5",
         params: [{ id: "thinking", value: "true" }, { id: "effort", value: "high" }],
       }),
-      "claude-sonnet-4-6 (thinking:true, effort:high)"
+      "claude-sonnet-4-5 (thinking:true, effort:high)"
     );
   });
 });

@@ -40,8 +40,8 @@ function resolveModel(
 // Stratégie coût/qualité :
 //   - Pipeline (agents en boucle possible) : sonnet-4-6 ou composer-2 selon le besoin
 //   - Agents hors-pipeline : composer-2 par défaut (invocations manuelles ponctuelles)
-//   - Thinking activé seulement là où le raisonnement profond est nécessaire
-//     (architect, redteam) — chaque thinking token coûte plus cher
+//   - Thinking activé là où le raisonnement profond est nécessaire (architect ;
+//     redteam sur composer-2 avec thinking si le backend le prend en charge)
 // ---------------------------------------------------------------------------
 
 const AGENT_DEFINITIONS = {
@@ -52,7 +52,7 @@ const AGENT_DEFINITIONS = {
     tier: "strong" as const,
     // Rédaction de specs : bon sens du contexte, pas besoin de thinking approfondi
     defaultModel: {
-      id: "claude-sonnet-4-6",
+      id: "claude-sonnet-4-5",
       params: [
         { id: "thinking", value: "false" },
         { id: "context",  value: "200k" },
@@ -66,7 +66,7 @@ const AGENT_DEFINITIONS = {
     tier: "strong" as const,
     // Décisions de design : thinking:true justifié (trade-off coût/qualité acceptable)
     defaultModel: {
-      id: "claude-sonnet-4-6",
+      id: "claude-sonnet-4-5",
       params: [
         { id: "thinking", value: "true" },
         { id: "context",  value: "200k" },
@@ -98,14 +98,10 @@ const AGENT_DEFINITIONS = {
     promptFile: "red-team",
     description: "Red Team — audit de sécurité",
     tier: "strong" as const,
-    // Audit sécu : thinking:true nécessaire, pas opus (trop cher pour un pipeline)
+    // composer-2 sans fast ; thinking:true si exposé par le backend (sinon ignoré)
     defaultModel: {
-      id: "claude-sonnet-4-6",
-      params: [
-        { id: "thinking", value: "true" },
-        { id: "context",  value: "200k" },
-        { id: "effort",   value: "medium" },
-      ],
+      id: "composer-2",
+      params: [{ id: "thinking", value: "true" }],
     } satisfies ModelSelection,
   },
 
@@ -152,7 +148,7 @@ const AGENT_DEFINITIONS = {
     tier: "strong" as const,
     // Analyse de conformité : sonnet sans thinking est un bon compromis
     defaultModel: {
-      id: "claude-sonnet-4-6",
+      id: "claude-sonnet-4-5",
       params: [
         { id: "thinking", value: "false" },
         { id: "context",  value: "200k" },

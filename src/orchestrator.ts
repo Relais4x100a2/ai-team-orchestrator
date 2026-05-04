@@ -34,7 +34,7 @@ import {
 } from "./agent-config.js";
 import { checkFrugalMode } from "./spend-guard.js";
 import { syncBacklogToGitHub } from "./github-sync.js";
-import type { Backlog, BacklogIssue, IssuePriority, IssueStatus } from "./backlog.js";
+import type { Backlog, BacklogIssue, IssuePriority, IssueSize, IssueStatus } from "./backlog.js";
 import {
   generateIssueId,
   parsePMOutput,
@@ -447,7 +447,7 @@ async function pipelineNext() {
     ? `\n\nCette implémentation doit refermer l'issue GitHub #${issue.githubIssueNumber} — inclure \`close #${issue.githubIssueNumber}\` dans le message de commit ou la description de PR.`
     : "";
   try {
-    await fullPipeline(issue.description + issueRef, { pipelineRunId });
+    await fullPipeline(issue.description + issueRef, { pipelineRunId, issueSize: issue.size });
 
     // Mark done (re-read backlog to avoid conflicts)
     const freshBacklog = loadBacklog();
@@ -490,15 +490,24 @@ async function pipelineNext() {
  */
 async function fullPipeline(
   brief: string,
-  opts: { resumeFrom?: PipelineStep; pipelineRunId?: string } = {}
+  opts: { resumeFrom?: PipelineStep; pipelineRunId?: string; issueSize?: IssueSize } = {}
 ) {
-  const resumeFrom = opts.resumeFrom ?? "pm";
+  // Routing par taille : S → dev direct, M → skip PM, L/XL → pipeline complet
+  // Un --resume-from explicite prend toujours le dessus.
+  const sizeBasedStart: Record<IssueSize, PipelineStep> = {
+    S: "dev",
+    M: "architect",
+    L: "pm",
+    XL: "pm",
+  };
+  const resumeFrom = opts.resumeFrom
+    ?? (opts.issueSize ? sizeBasedStart[opts.issueSize] : "pm");
   const startIdx = PIPELINE_STEPS.indexOf(resumeFrom);
   const runId = opts.pipelineRunId ?? newPipelineRunId();
   const startedAt = new Date().toISOString();
 
-  // Vérification du budget avant de lancer les agents
-  const frugal = await checkFrugalMode(process.env);
+  // Vérification du budget — réévaluée avant chaque étape cloud pour basculer en frugal en cours de pipeline
+  let frugal = await checkFrugalMode(process.env);
   if (frugal) {
     console.warn(
       "\n⚠️  MODE FRUGAL — Seuil de dépenses atteint (SPEND_ALERT_CENTS).\n" +
@@ -520,8 +529,11 @@ async function fullPipeline(
     console.log("═".repeat(60));
     console.log("🏗️  PIPELINE COMPLET — Du brief au déploiement (avec feedback loop)");
     if (resumeFrom !== "pm") {
-      console.log(`   ⏩ Reprise depuis : ${resumeFrom.toUpperCase()} (étapes précédentes ignorées)`);
-      console.log(`   📄 Contexte injecté depuis le brief fourni.`);
+      const reason = opts.resumeFrom
+        ? "--resume-from explicite"
+        : `routing taille ${opts.issueSize ?? "?"}`;
+      console.log(`   ⏩ Démarrage depuis : ${resumeFrom.toUpperCase()} (${reason})`);
+      if (!opts.resumeFrom) console.log(`   📄 Brief d'origine transmis directement au Dev.`);
     }
     console.log("═".repeat(60));
 
@@ -533,7 +545,13 @@ async function fullPipeline(
   // ── Étape 1 : Product Manager ──
   if (startIdx === 0) {
     console.log("\n📋 ÉTAPE 1/5 — Product Manager");
-    specs = await runAgent("pm", brief, { frugal });
+    const pmOutput = await runAgent("pm", brief, { frugal });
+    if (pmOutput.trim()) {
+      specs = pmOutput;
+    } else {
+      console.log("   ℹ️  L'agent PM n'a pas jugé utile d'ajouter quoi que ce soit et a rendu la main sans ajout. Brief d'origine conservé.");
+      // specs reste = brief
+    }
     console.log("⏸️  CHECKPOINT : Review les specs ci-dessus.");
     console.log("   En production, le pipeline s'arrête ici pour ta validation.\n");
   } else {
@@ -543,23 +561,35 @@ async function fullPipeline(
   // ── Étape 2 : Data Architect ──
   if (startIdx <= 1) {
     console.log("\n🏛️  ÉTAPE 2/5 — Data Architect");
-    architecture = await runAgent(
+    const architectOutput = await runAgent(
       "architect",
       "Conçois l'architecture technique et le modèle de données pour les specs suivantes.",
       { additionalContext: specs, frugal }
     );
+    if (architectOutput.trim()) {
+      architecture = architectOutput;
+    } else {
+      console.log("   ℹ️  L'agent Architect n'a pas jugé utile d'ajouter quoi que ce soit et a rendu la main sans ajout.");
+      // architecture reste = ""
+    }
     console.log("⏸️  CHECKPOINT : Review l'architecture ci-dessus.\n");
   } else {
     console.log("\n🏛️  ÉTAPE 2/5 — Data Architect : ⏭  ignoré (--resume-from)");
   }
 
   // ── Étape 3 & 4 : Dev ⇄ QA Loop ──
-  const devContext = architecture
-    ? `## Specs PM\n${specs}\n\n## Architecture\n${architecture}`
-    : `## Contexte fourni\n${specs}`;
+  // Option C : le brief d'origine est toujours présent pour le Dev,
+  // même si PM/Architect ont enrichi le contexte.
+  const devContext = [
+    `## Brief d'origine\n${brief}`,
+    specs !== brief ? `## Specs PM\n${specs}` : null,
+    architecture ? `## Architecture\n${architecture}` : null,
+  ].filter(Boolean).join("\n\n");
 
   if (startIdx <= 2) {
     console.log("\n💻 ÉTAPE 3/5 — Développeur Full-Stack");
+    frugal = frugal || await checkFrugalMode(process.env);
+    if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape (seuil SPEND_ALERT_CENTS atteint).");
   }
   let implementation = startIdx <= 2
     ? await runAgent(
@@ -580,6 +610,8 @@ async function fullPipeline(
     while (!qaApproved && qaIteration < maxQAIterations) {
       qaIteration++;
       console.log(`\n🧪 ÉTAPE 4/5 — QA Engineer — itération ${qaIteration}/${maxQAIterations}`);
+      frugal = frugal || await checkFrugalMode(process.env);
+      if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape (seuil SPEND_ALERT_CENTS atteint).");
 
       const qaPrompt = qaIteration === 1
         ? "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité aux specs."
@@ -608,6 +640,8 @@ async function fullPipeline(
         console.log("✅ QA APPROUVE — Passage à l'audit de sécurité.\n");
       } else if (qaIteration < maxQAIterations) {
         console.log("🔄 QA DEMANDE DES CHANGEMENTS — Relance du développeur.\n");
+        frugal = frugal || await checkFrugalMode(process.env);
+        if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape (seuil SPEND_ALERT_CENTS atteint).");
 
         implementation = await runAgent(
           "dev",
@@ -635,6 +669,8 @@ async function fullPipeline(
   while (!securityApproved && rtIteration < maxRTIterations) {
     rtIteration++;
     console.log(`\n🔴 ÉTAPE 5/5 — Red Team — itération ${rtIteration}/${maxRTIterations}`);
+    frugal = frugal || await checkFrugalMode(process.env);
+    if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape (seuil SPEND_ALERT_CENTS atteint).");
 
     const rtPrompt = rtIteration === 1
       ? "Audite le code de la PR pour les vulnérabilités de sécurité."
@@ -735,12 +771,16 @@ async function main() {
   // Charger le projet s'il est spécifié
   const projectFlag = args.indexOf("--project");
   if (projectFlag !== -1) {
-    const projectPath = args[projectFlag + 1];
+    let projectPath = args[projectFlag + 1];
     if (!projectPath || projectPath.startsWith("--")) {
       console.error(
-        "❌ --project nécessite un chemin vers un fichier (ex. projects/monprojet.md)."
+        "❌ --project nécessite un nom ou un chemin (ex. geneweb-py ou projects/geneweb-py.md)."
       );
       process.exit(1);
+    }
+    // Résolution automatique : "geneweb-py" → "projects/geneweb-py.md"
+    if (!projectPath.includes("/") && !projectPath.endsWith(".md")) {
+      projectPath = `projects/${projectPath}.md`;
     }
     activeProject = loadProject(projectPath);
     activeProjectSlug = basename(projectPath, ".md")

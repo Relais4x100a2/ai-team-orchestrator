@@ -58,10 +58,10 @@ cp projects/_template.md projects/monprojet.md
 # Remplir le frontmatter : name, repo, branch, local_path
 
 # Lancer un agent seul pour tester
-npm run start -- --project projects/monprojet.md --role pm "Ajouter une page d'upload"
+npm run project -- monprojet --role pm "Ajouter une page d'upload"
 
 # Lancer le pipeline complet
-npm run start -- --project projects/monprojet.md --pipeline full \
+npm run project -- monprojet --pipeline full \
   "Créer une fonctionnalité d'import de dataset CSV avec prévisualisation et validation"
 ```
 
@@ -151,7 +151,7 @@ local_path: ~/code_dev/mon-projet   # optionnel — chemin local vers le repo cl
 [Description...]
 ```
 
-Au démarrage avec `--project projects/monprojet.md` :
+Au démarrage avec `npm run project -- monprojet` :
 - Le contexte est **injecté dans tous les prompts** des agents
 - `local_path` devient le **répertoire de travail** des agents locaux (PM, Architect) — ils voient et lisent le vrai code source
 - `repo` + `branch` définissent la cible des agents cloud (Dev, QA, Red Team)
@@ -161,7 +161,7 @@ Au démarrage avec `--project projects/monprojet.md` :
 1. Copie `projects/_template.md` en `projects/monprojet.md`
 2. Remplis le frontmatter YAML : `name`, `repo`, `branch`, et `local_path` (chemin vers le repo cloné localement — permet aux agents locaux de lire le vrai code source)
 3. Ajoute les sections : Stack technique, Conventions, Déploiement, Contraintes
-4. Lance : `npm run start -- --project projects/monprojet.md --role pm "..."`
+4. Lance : `npm run project -- monprojet --role pm "..."`
 
 > `projects/*.md` sont dans `.gitignore` (sauf `_template.md`) — tes informations de projet restent locales.
 
@@ -173,13 +173,13 @@ Lance un seul agent pour une tâche spécifique :
 
 ```bash
 # --project est obligatoire (la sortie est sauvegardée dans last-run/<slug>/<role>.md)
-npm run start -- --project projects/monprojet.md --role pm "Je veux un dashboard de statistiques"
-npm run start -- --project projects/monprojet.md --role architect "Conçois le schéma BDD"
-npm run start -- --project projects/monprojet.md --role dev "Implémente la page"
-npm run start -- --project projects/monprojet.md --role qa "Review la PR #12"
-npm run start -- --project projects/monprojet.md --role redteam "Audite la sécurité"
-npm run start -- --project projects/monprojet.md --role ux "Esquisse les parcours"
-npm run start -- --project projects/monprojet.md --role devops "Propose la CI"
+npm run project -- monprojet --role pm "Je veux un dashboard de statistiques"
+npm run project -- monprojet --role architect "Conçois le schéma BDD"
+npm run project -- monprojet --role dev "Implémente la page"
+npm run project -- monprojet --role qa "Review la PR #12"
+npm run project -- monprojet --role redteam "Audite la sécurité"
+npm run project -- monprojet --role ux "Esquisse les parcours"
+npm run project -- monprojet --role devops "Propose la CI"
 ```
 
 ### Mode pipeline complet
@@ -188,10 +188,10 @@ Lance les 5 agents en séquence, chacun recevant le contexte du précédent :
 
 ```bash
 # --project est obligatoire
-npm run start -- --project projects/monprojet.md --pipeline full "Brief de la fonctionnalité"
+npm run project -- monprojet --pipeline full "Brief de la fonctionnalité"
 
 # Pipeline avec backlog (prend la prochaine issue dans le backlog)
-npm run start -- --project projects/monprojet.md --pipeline next
+npm run project -- monprojet --pipeline next
 ```
 
 **Reprise et fichiers de brief :**
@@ -199,14 +199,14 @@ Après chaque exécution d’un agent, sa sortie est automatiquement sauvegardé
 
 ```bash
 # Lancer le PM pour générer le brief (sauvegardé dans last-run/monprojet/pm.md)
-npm run start -- --project projects/monprojet.md --role pm "Brief initial..."
+npm run project -- monprojet --role pm "Brief initial..."
 
 # Reprendre à partir de l’architecte avec la sortie du PM
-npm run start -- --project projects/monprojet.md --pipeline full \
+npm run project -- monprojet --pipeline full \
   --brief-file last-run/monprojet/pm.md --resume-from architect
 
 # Reprendre depuis le dev après avoir ajusté l’architecture manuellement
-npm run start -- --project projects/monprojet.md --pipeline full \
+npm run project -- monprojet --pipeline full \
   --brief-file last-run/monprojet/architect.md --resume-from dev
 ```
 
@@ -226,8 +226,8 @@ Le pipeline s'arrête à chaque **checkpoint** pour ta validation
 Les rôles **`ux`**, **`ui`**, **`devops`**, **`sre`**, **`release`**, **`techwriter`**, **`privacy`** se lancent comme n'importe quel autre agent avec `--role <clé>`. Ils ne sont **pas** enchaînés automatiquement après `fullPipeline`.
 
 ```bash
-npm run start -- --project projects/monprojet.md --role devops "Propose la CI GitHub Actions"
-npm run start -- --project projects/monprojet.md --role techwriter "Met à jour le README"
+npm run project -- monprojet --role devops "Propose la CI GitHub Actions"
+npm run project -- monprojet --role techwriter "Met à jour le README"
 ```
 
 ## 🔐 Chaîne assurance (DevOps / SRE / doc)

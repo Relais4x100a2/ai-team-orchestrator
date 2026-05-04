@@ -26,7 +26,7 @@
     "sync:issues": "tsx src/orchestrator.ts --sync-issues",
     "backlog": "tsx src/orchestrator.ts --backlog",
     "verify:prompts": "tsx src/verify-prompts.ts",
-    "project:dataset-style": "tsx src/orchestrator.ts --project projects/dataset-style.md"
+    "project": "tsx src/orchestrator.ts --project"
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.0",
