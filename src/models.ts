@@ -37,6 +37,7 @@ export interface BacklogIssue {
   updatedAt: string;
   completedAt: string | null;
   pipelineRun: string | null;
+  githubIssueNumber?: number;
 }
 
 export interface Backlog {

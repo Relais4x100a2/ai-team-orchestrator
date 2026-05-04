@@ -23,6 +23,7 @@
     "pipeline": "tsx src/orchestrator.ts --pipeline full",
     "pipeline:next": "tsx src/orchestrator.ts --pipeline next",
     "pm:backlog": "tsx src/orchestrator.ts --pm-backlog",
+    "sync:issues": "tsx src/orchestrator.ts --sync-issues",
     "backlog": "tsx src/orchestrator.ts --backlog",
     "verify:prompts": "tsx src/verify-prompts.ts",
     "project:dataset-style": "tsx src/orchestrator.ts --project projects/dataset-style.md"

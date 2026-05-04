@@ -33,6 +33,7 @@ import {
   type PipelineStep,
 } from "./agent-config.js";
 import { checkFrugalMode } from "./spend-guard.js";
+import { syncBacklogToGitHub } from "./github-sync.js";
 import type { Backlog, BacklogIssue, IssuePriority, IssueStatus } from "./backlog.js";
 import {
   generateIssueId,
@@ -442,8 +443,11 @@ async function pipelineNext() {
   issue.pipelineRun = pipelineRunId;
   saveBacklog(backlog);
 
+  const issueRef = issue.githubIssueNumber
+    ? `\n\nCette implémentation doit refermer l'issue GitHub #${issue.githubIssueNumber} — inclure \`close #${issue.githubIssueNumber}\` dans le message de commit ou la description de PR.`
+    : "";
   try {
-    await fullPipeline(issue.description, { pipelineRunId });
+    await fullPipeline(issue.description + issueRef, { pipelineRunId });
 
     // Mark done (re-read backlog to avoid conflicts)
     const freshBacklog = loadBacklog();
@@ -812,6 +816,20 @@ async function main() {
       const brief = briefFromFile ?? (briefFromCli || "Analyse le projet existant et propose des améliorations.");
       await fullPipeline(brief, { resumeFrom });
     }
+  } else if (args.includes("--sync-issues")) {
+    // Mode sync GitHub Issues : crée les issues manquantes depuis backlog.json
+    if (!activeProject?.repo) {
+      console.error("❌ --sync-issues nécessite --project avec un champ repo: dans le frontmatter.");
+      process.exit(1);
+    }
+    const token = process.env.GITHUB_TOKEN;
+    if (!token) {
+      console.error("❌ --sync-issues nécessite GITHUB_TOKEN dans .env.");
+      process.exit(1);
+    }
+    const backlog = loadBacklog();
+    const count = await syncBacklogToGitHub(backlog, activeProject.repo, token);
+    if (count > 0) saveBacklog(backlog);
   } else if (pmBacklogFlag !== -1) {
     // Mode PM backlog : npm run pm:backlog
     await pmBacklogWorkflow();
