@@ -5,8 +5,11 @@
  * Hiérarchie de résolution du modèle (du plus prioritaire au moins) :
  *   1. MODEL_<ROLE> (ex: MODEL_PM=gpt-5.5) — override par rôle, sans params
  *   2. MODEL_STRONG / MODEL_FAST           — override par tier, sans params
- *   3. Défaut codé ci-dessous              — inclut les params SDK optimaux
+ *   3. Grille taille d'issue (S/M/L/XL)     — rôles pipeline uniquement, si `issueSize` fourni (`resolveRunModel`)
+ *   4. Défaut codé ci-dessous              — inclut les params SDK optimaux
  */
+
+import type { IssueSize } from "./backlog.js";
 
 /** Sélection de modèle transmise au SDK Cursor (shape identique à ModelSelection). */
 export interface ModelSelection {
@@ -160,6 +163,126 @@ const AGENT_DEFINITIONS = {
 
 export type AgentRole = keyof typeof AGENT_DEFINITIONS;
 
+/** Clés d'environnement `MODEL_*` par rôle. */
+const PER_ROLE_ENV_KEY: Record<AgentRole, string> = {
+  pm: "MODEL_PM",
+  architect: "MODEL_ARCHITECT",
+  ux: "MODEL_UX",
+  dev: "MODEL_DEV",
+  qa: "MODEL_QA",
+  redteam: "MODEL_REDTEAM",
+  devops: "MODEL_DEVOPS",
+  sre: "MODEL_SRE",
+  release: "MODEL_RELEASE",
+  ui: "MODEL_UI",
+  techwriter: "MODEL_TECHWRITER",
+  privacy: "MODEL_PRIVACY",
+};
+
+/** Rôles du pipeline `full` pour lesquels la grille S/M/L/XL s'applique. */
+const PIPELINE_ROLE_WITH_SIZE_GRID = new Set<AgentRole>(["pm", "architect", "dev", "qa", "redteam"]);
+
+const COMPOSER_FAST: ModelSelection = {
+  id: "composer-2",
+  params: [{ id: "fast", value: "true" }],
+};
+
+const COMPOSER_SLOW: ModelSelection = {
+  id: "composer-2",
+  params: [{ id: "fast", value: "false" }],
+};
+
+const COMPOSER_THINK: ModelSelection = {
+  id: "composer-2",
+  params: [{ id: "thinking", value: "true" }],
+};
+
+const HAIKU_PM: ModelSelection = {
+  id: "claude-haiku-4-5",
+  params: [{ id: "context", value: "200k" }],
+};
+
+const PM_XL: ModelSelection = {
+  id: "claude-sonnet-4-5",
+  params: [
+    { id: "thinking", value: "false" },
+    { id: "context", value: "200k" },
+    { id: "effort", value: "high" },
+  ],
+};
+
+const ARCHITECT_OPUS: ModelSelection = {
+  id: "claude-opus-4-7",
+  params: [
+    { id: "thinking", value: "true" },
+    { id: "context", value: "200k" },
+    { id: "effort", value: "medium" },
+  ],
+};
+
+const REDTEAM_SONNET: ModelSelection = {
+  id: "claude-sonnet-4-5",
+  params: [
+    { id: "thinking", value: "true" },
+    { id: "context", value: "200k" },
+    { id: "effort", value: "medium" },
+  ],
+};
+
+/**
+ * Modèle de base pour un rôle pipeline avant overrides env, selon la taille d'issue.
+ * L = défauts `AGENT_DEFINITIONS` ; S/M/XL = variantes coût / qualité.
+ */
+function modelForRoleAndIssueSize(role: AgentRole, size: IssueSize): ModelSelection {
+  if (size === "L") {
+    return AGENT_DEFINITIONS[role].defaultModel as ModelSelection;
+  }
+  switch (role) {
+    case "pm":
+      return size === "XL" ? PM_XL : HAIKU_PM;
+    case "architect":
+      if (size === "S") return COMPOSER_FAST;
+      if (size === "XL") return ARCHITECT_OPUS;
+      return AGENT_DEFINITIONS.architect.defaultModel as ModelSelection;
+    case "dev":
+      return size === "XL" ? COMPOSER_SLOW : COMPOSER_FAST;
+    case "qa":
+      return size === "XL" ? COMPOSER_SLOW : COMPOSER_FAST;
+    case "redteam":
+      return size === "XL" ? REDTEAM_SONNET : COMPOSER_THINK;
+    default:
+      return AGENT_DEFINITIONS[role].defaultModel as ModelSelection;
+  }
+}
+
+/**
+ * Résout le modèle pour un run (pipeline avec `issueSize`, mode frugal, overrides `.env`).
+ */
+export function resolveRunModel(
+  role: AgentRole,
+  opts: { issueSize?: IssueSize; frugal: boolean; env?: NodeJS.ProcessEnv },
+): ModelSelection {
+  const env = opts.env ?? process.env;
+  if (opts.frugal) return FRUGAL_MODEL;
+
+  const def = AGENT_DEFINITIONS[role];
+  const useGrid =
+    opts.issueSize !== undefined && PIPELINE_ROLE_WITH_SIZE_GRID.has(role);
+  const base = useGrid
+    ? modelForRoleAndIssueSize(role, opts.issueSize!)
+    : (def.defaultModel as ModelSelection);
+
+  const rawPerRole = env[PER_ROLE_ENV_KEY[role] as keyof NodeJS.ProcessEnv];
+  const perRoleTrimmed =
+    typeof rawPerRole === "string" ? rawPerRole.trim() || undefined : undefined;
+  const tierEnv =
+    def.tier === "strong"
+      ? env.MODEL_STRONG?.trim() || undefined
+      : env.MODEL_FAST?.trim() || undefined;
+
+  return resolveModel(base, perRoleTrimmed, tierEnv);
+}
+
 export type AgentRoleConfig = {
   promptFile: string;
   model: ModelSelection;
@@ -177,39 +300,15 @@ export function expectedPromptBasenames(): string[] {
   return [...set].sort();
 }
 
-/** Construit la config résolue pour chaque rôle à partir des variables d'environnement. */
+/** Construit la config résolue pour chaque rôle (sans `issueSize` — équivalent invocations hors `fullPipeline` avec taille). */
 export function createAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
-  const tierEnvs: Record<"strong" | "fast", string | undefined> = {
-    strong: env.MODEL_STRONG?.trim() || undefined,
-    fast:   env.MODEL_FAST?.trim()   || undefined,
-  };
-
-  const perRoleEnvKey: Record<AgentRole, string> = {
-    pm:         "MODEL_PM",
-    architect:  "MODEL_ARCHITECT",
-    ux:         "MODEL_UX",
-    dev:        "MODEL_DEV",
-    qa:         "MODEL_QA",
-    redteam:    "MODEL_REDTEAM",
-    devops:     "MODEL_DEVOPS",
-    sre:        "MODEL_SRE",
-    release:    "MODEL_RELEASE",
-    ui:         "MODEL_UI",
-    techwriter: "MODEL_TECHWRITER",
-    privacy:    "MODEL_PRIVACY",
-  };
-
   const out = {} as Record<AgentRole, AgentRoleConfig>;
   for (const role of Object.keys(AGENT_DEFINITIONS) as AgentRole[]) {
     const def = AGENT_DEFINITIONS[role];
     out[role] = {
-      promptFile:  def.promptFile,
+      promptFile: def.promptFile,
       description: def.description,
-      model: resolveModel(
-        def.defaultModel,
-        env[perRoleEnvKey[role]]?.trim() || undefined,
-        tierEnvs[def.tier],
-      ),
+      model: resolveRunModel(role, { frugal: false, env }),
     };
   }
   return out as AgentConfig;

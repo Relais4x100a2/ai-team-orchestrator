@@ -13,7 +13,7 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
 
 - TypeScript (Node.js) pour l'orchestrateur
 - Cursor SDK (@cursor/sdk) pour les agents
-- Modèles : `MODEL_STRONG` et `MODEL_FAST` dans `.env`, résolus dans `createAgentConfig()` (`src/agent-config.ts`), consommés par `src/orchestrator.ts`. Overrides optionnels par rôle : `MODEL_PM`, `MODEL_ARCHITECT`, etc. (voir `perRoleEnvKey` dans `agent-config.ts`).
+- Modèles : `MODEL_STRONG` / `MODEL_FAST` et `MODEL_<ROLE>` dans `.env`, résolus dans `resolveRunModel()` (`src/agent-config.ts`) — utilisé par `runAgent` et par `createAgentConfig()` (invocations sans taille d'issue). Sur `pipeline next`, la **taille d'issue** du backlog (`S`/`M`/`L`/`XL`) applique une grille coût/qualité pour les rôles pipeline (détail dans `agent-config.ts`).
 - Projets **cibles** multiples (configuration via `projects/*.md`)
 - **Variables `.env` utiles**
   - `CURSOR_API_KEY` — obligatoire pour lancer les agents

@@ -79,7 +79,7 @@ ai-team-orchestrator/
 │   ├── models.ts             # 📐 Schéma backlog / pipeline (validation stricte)
 │   ├── pipeline-runs.ts      # 📝 Append des exécutions pipeline → pipeline-runs.json
 │   ├── orchestrator.ts       # 🧠 Script principal (le cerveau)
-│   ├── agent-config.ts       # 📋 Liste des prompts / résolution MODEL_*
+│   ├── agent-config.ts       # 📋 Prompts / `resolveRunModel` (grille S–XL + MODEL_*)
 │   ├── spend-guard.ts        # 💰 Garde-fou budgétaire (SPEND_ALERT_CENTS)
 │   ├── backlog.ts            # 📦 Parse backlog & sélection « next » issue
 │   ├── pipeline-detection.ts # ✅ Heuristiques verdict QA / Red Team

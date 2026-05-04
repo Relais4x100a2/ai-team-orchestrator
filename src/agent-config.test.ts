@@ -4,6 +4,7 @@ import {
   createAgentConfig,
   expectedPromptBasenames,
   formatModelSelection,
+  resolveRunModel,
 } from "./agent-config.js";
 
 describe("expectedPromptBasenames", () => {
@@ -72,6 +73,52 @@ describe("createAgentConfig", () => {
     const cfg = createAgentConfig({});
     assert.strictEqual(cfg.pm.promptFile, "product-manager");
     assert.ok(cfg.redteam.description.length > 0);
+  });
+});
+
+describe("resolveRunModel", () => {
+  it("applique la grille S (PM Haiku, architect Composer fast)", () => {
+    const pm = resolveRunModel("pm", { issueSize: "S", frugal: false, env: {} });
+    assert.strictEqual(pm.id, "claude-haiku-4-5");
+    const arch = resolveRunModel("architect", { issueSize: "S", frugal: false, env: {} });
+    assert.strictEqual(arch.id, "composer-2");
+    assert.ok(arch.params?.some(p => p.id === "fast" && p.value === "true"));
+  });
+
+  it("taille L = défauts codés (Sonnet PM sans thinking)", () => {
+    const pm = resolveRunModel("pm", { issueSize: "L", frugal: false, env: {} });
+    assert.strictEqual(pm.id, "claude-sonnet-4-5");
+    assert.ok(pm.params?.some(p => p.id === "thinking" && p.value === "false"));
+  });
+
+  it("taille XL (architect Opus, dev/qa Composer slow, redteam Sonnet)", () => {
+    const arch = resolveRunModel("architect", { issueSize: "XL", frugal: false, env: {} });
+    assert.strictEqual(arch.id, "claude-opus-4-7");
+    const dev = resolveRunModel("dev", { issueSize: "XL", frugal: false, env: {} });
+    assert.strictEqual(dev.id, "composer-2");
+    assert.ok(dev.params?.some(p => p.id === "fast" && p.value === "false"));
+    const rt = resolveRunModel("redteam", { issueSize: "XL", frugal: false, env: {} });
+    assert.strictEqual(rt.id, "claude-sonnet-4-5");
+  });
+
+  it("MODEL_<ROLE> reste prioritaire sur la grille", () => {
+    const pm = resolveRunModel("pm", {
+      issueSize: "S",
+      frugal: false,
+      env: { MODEL_PM: "gpt-5.5" },
+    });
+    assert.strictEqual(pm.id, "gpt-5.5");
+  });
+
+  it("sans issueSize, ignore la grille (privacy Sonnet même si on ne passe pas issueSize)", () => {
+    const p = resolveRunModel("privacy", { frugal: false, env: {} });
+    assert.strictEqual(p.id, "claude-sonnet-4-5");
+  });
+
+  it("frugal force composer-2 même avec issueSize XL", () => {
+    const arch = resolveRunModel("architect", { issueSize: "XL", frugal: true, env: {} });
+    assert.strictEqual(arch.id, "composer-2");
+    assert.ok(arch.params?.some(p => p.id === "fast" && p.value === "true"));
   });
 });
 

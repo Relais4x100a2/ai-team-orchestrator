@@ -27,8 +27,8 @@ import matter from "gray-matter";
 import {
   createAgentConfig,
   formatModelSelection,
-  FRUGAL_MODEL,
   PIPELINE_STEPS,
+  resolveRunModel,
   type AgentRole,
   type PipelineStep,
 } from "./agent-config.js";
@@ -197,10 +197,16 @@ async function runAgent(
     additionalContext?: string;
     /** true = forcer composer-2 (seuil de dépenses atteint) */
     frugal?: boolean;
+    /** Taille d'issue backlog → grille modèles (rôles pipeline uniquement) */
+    issueSize?: IssueSize;
   } = {}
 ) {
   const config = AGENT_CONFIG[role];
-  const model = options.frugal ? FRUGAL_MODEL : config.model;
+  const model = resolveRunModel(role, {
+    issueSize: options.issueSize,
+    frugal: Boolean(options.frugal),
+    env: process.env,
+  });
   const prompt = loadPrompt(config.promptFile);
 
   console.log(`\n🚀 Lancement de l'agent : ${config.description}`);
@@ -525,9 +531,14 @@ async function fullPipeline(
   const briefForRecord =
     brief.length > 50_000 ? `${brief.slice(0, 50_000)}\n\n[… tronqué pour pipeline-runs.json …]` : brief;
 
+  const pipelineIssueSize = opts.issueSize;
+
   try {
     console.log("═".repeat(60));
     console.log("🏗️  PIPELINE COMPLET — Du brief au déploiement (avec feedback loop)");
+    if (pipelineIssueSize) {
+      console.log(`   📐 Taille issue (grille modèles) : ${pipelineIssueSize}`);
+    }
     if (resumeFrom !== "pm") {
       const reason = opts.resumeFrom
         ? "--resume-from explicite"
@@ -545,7 +556,7 @@ async function fullPipeline(
   // ── Étape 1 : Product Manager ──
   if (startIdx === 0) {
     console.log("\n📋 ÉTAPE 1/5 — Product Manager");
-    const pmOutput = await runAgent("pm", brief, { frugal });
+    const pmOutput = await runAgent("pm", brief, { frugal, issueSize: pipelineIssueSize });
     if (pmOutput.trim()) {
       specs = pmOutput;
     } else {
@@ -564,7 +575,7 @@ async function fullPipeline(
     const architectOutput = await runAgent(
       "architect",
       "Conçois l'architecture technique et le modèle de données pour les specs suivantes.",
-      { additionalContext: specs, frugal }
+      { additionalContext: specs, frugal, issueSize: pipelineIssueSize }
     );
     if (architectOutput.trim()) {
       architecture = architectOutput;
@@ -595,7 +606,7 @@ async function fullPipeline(
     ? await runAgent(
         "dev",
         "Implémente les fonctionnalités selon les specs et l'architecture ci-dessous. Crée une branche feature/ et ouvre une PR.",
-        { additionalContext: devContext, cloud: true, autoCreatePR: true, frugal }
+        { additionalContext: devContext, cloud: true, autoCreatePR: true, frugal, issueSize: pipelineIssueSize }
       )
     : brief; // si on reprend depuis QA ou redteam, le brief est le contexte de l'implémentation
 
@@ -630,6 +641,7 @@ async function fullPipeline(
           additionalContext: qaAdditionalContext,
           cloud: true,
           frugal,
+          issueSize: pipelineIssueSize,
         }
       );
 
@@ -651,6 +663,7 @@ async function fullPipeline(
             cloud: true,
             autoCreatePR: false,
             frugal,
+            issueSize: pipelineIssueSize,
           }
         );
       } else {
@@ -683,6 +696,7 @@ async function fullPipeline(
         additionalContext: implementation,
         cloud: true,
         frugal,
+        issueSize: pipelineIssueSize,
       }
     );
 
@@ -702,6 +716,7 @@ async function fullPipeline(
           cloud: true,
           autoCreatePR: false,
           frugal,
+          issueSize: pipelineIssueSize,
         }
       );
     } else if (securityVerdict === "MEDIUM_ISSUES") {
