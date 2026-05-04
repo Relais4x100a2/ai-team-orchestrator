@@ -2,6 +2,7 @@
 name: Nom du projet
 repo: https://github.com/org/repo-name
 branch: main
+local_path: ~/code_dev/repo-name
 ---
 
 ## Vue d'ensemble

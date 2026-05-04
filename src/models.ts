@@ -50,6 +50,8 @@ export interface ProjectContext {
   repo: string;
   branch: string;
   content: string;
+  /** Chemin absolu vers la copie locale du repo (optionnel). Utilisé comme workingDirectory pour les agents locaux. */
+  localPath?: string;
 }
 
 export interface PipelineRun {

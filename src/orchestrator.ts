@@ -120,11 +120,19 @@ function loadProject(filePath: string): ProjectContext {
   if (data.branch !== undefined && typeof data.branch !== "string") {
     throw new Error(`Frontmatter "branch" invalide dans ${displayPath} : chaîne attendue.`);
   }
+  if (data.local_path !== undefined && typeof data.local_path !== "string") {
+    throw new Error(`Frontmatter "local_path" invalide dans ${displayPath} : chaîne attendue.`);
+  }
+  const rawLocalPath = typeof data.local_path === "string" ? data.local_path.trim() : "";
+  const resolvedLocalPath = rawLocalPath
+    ? (isAbsolute(rawLocalPath) ? rawLocalPath : resolve(process.env.HOME ?? "", rawLocalPath.replace(/^~\//, "")))
+    : undefined;
   const project: ProjectContext = {
     name: typeof data.name === "string" && data.name.trim() ? data.name.trim() : "Projet sans nom",
     repo: typeof data.repo === "string" && data.repo.trim() ? data.repo.trim() : (process.env.TARGET_REPO_URL ?? "").trim(),
     branch: typeof data.branch === "string" && data.branch.trim() ? data.branch.trim() : (process.env.TARGET_BRANCH ?? "main").trim() || "main",
     content: parsed.content.trim(),
+    localPath: resolvedLocalPath,
   };
   assertValidProjectContext(project, absolutePath);
   return project;
@@ -206,7 +214,7 @@ async function runAgent(
 
   // Injection du contexte projet si disponible
   const projectSection = activeProject
-    ? `\n\n---\n\n## Contexte du projet cible\n\n**Projet :** ${activeProject.name}\n**Repo :** ${activeProject.repo}\n**Branche :** ${activeProject.branch}\n\n${activeProject.content}`
+    ? `\n\n---\n\n## Contexte du projet cible\n\n**Projet :** ${activeProject.name}\n**Repo :** ${activeProject.repo}\n**Branche :** ${activeProject.branch}${activeProject.localPath ? `\n**Chemin local :** ${activeProject.localPath}` : ""}\n\n${activeProject.content}`
     : "";
 
   requireRepoUrlForCloud(options.cloud);
@@ -234,9 +242,13 @@ async function runAgent(
       },
     });
   } else {
+    const localCwd = activeProject?.localPath ?? process.cwd();
     Object.assign(agentOptions, {
-      local: { cwd: process.cwd() },
+      local: { cwd: localCwd },
     });
+    if (activeProject?.localPath) {
+      console.log(`   Répertoire local : ${activeProject.localPath}`);
+    }
   }
 
   let agent;

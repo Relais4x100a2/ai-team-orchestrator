@@ -53,12 +53,16 @@ cp .env.example .env
 ### 3. Premier lancement
 
 ```bash
+# Créer un fichier projet (copier depuis le template)
+cp projects/_template.md projects/monprojet.md
+# Remplir le frontmatter : name, repo, branch, local_path
+
 # Lancer un agent seul pour tester
-npm run agent:pm "Ajouter une page d'upload de fichiers CSV avec validation"
+npm run start -- --project projects/monprojet.md --role pm "Ajouter une page d'upload"
 
 # Lancer le pipeline complet
-npm run pipeline "Créer une fonctionnalité d'import de dataset CSV
-avec prévisualisation, validation des colonnes, et stockage en BDD"
+npm run start -- --project projects/monprojet.md --pipeline full \
+  "Créer une fonctionnalité d'import de dataset CSV avec prévisualisation et validation"
 ```
 
 ### 4. Vérifications locales (contributeurs)
@@ -76,6 +80,7 @@ ai-team-orchestrator/
 │   ├── pipeline-runs.ts      # 📝 Append des exécutions pipeline → pipeline-runs.json
 │   ├── orchestrator.ts       # 🧠 Script principal (le cerveau)
 │   ├── agent-config.ts       # 📋 Liste des prompts / résolution MODEL_*
+│   ├── spend-guard.ts        # 💰 Garde-fou budgétaire (SPEND_ALERT_CENTS)
 │   ├── backlog.ts            # 📦 Parse backlog & sélection « next » issue
 │   ├── pipeline-detection.ts # ✅ Heuristiques verdict QA / Red Team
 │   ├── verify-prompts.ts     # CI : vérifie la présence des fichiers prompts
@@ -94,9 +99,8 @@ ai-team-orchestrator/
 │       ├── technical-writer.md
 │       └── privacy-by-design.md
 ├── tests/                    # Tests unitaires (node:test + tsx)
-├── projects/                 # 📂 Contexte spécifique par projet
-│   ├── dataset-style.md      # Exemple : Python + Streamlit + CapRover
-│   └── _template.md          # Template vide pour nouveau projet
+├── projects/                 # 📂 Contexte spécifique par projet (non versionné sauf _template.md)
+│   └── _template.md          # Template à copier pour chaque projet
 ├── .cursor/
 │   ├── mcp.json              # 🔌 Connexions MCP (Figma, GitHub)
 │   ├── hooks.json             # 🛑 Hooks de supervision
@@ -131,9 +135,10 @@ Chaque projet a un fichier `projects/<nom>.md` avec frontmatter YAML :
 
 ```yaml
 ---
-name: Dataset Style
-repo: https://github.com/Relais4x100a2/dataset_style
-branch: deploy/caprover-relais4
+name: Mon Projet
+repo: https://github.com/org/mon-projet
+branch: main
+local_path: ~/code_dev/mon-projet   # optionnel — chemin local vers le repo cloné
 ---
 
 ## Stack technique
@@ -146,17 +151,19 @@ branch: deploy/caprover-relais4
 [Description...]
 ```
 
-Au démarrage avec `--project projects/dataset-style.md`, le contexte du projet
-est **injecté automatiquement** dans tous les prompts des agents. Cela rend les agents
-génériques et capables de s'adapter à n'importe quelle stack.
+Au démarrage avec `--project projects/monprojet.md` :
+- Le contexte est **injecté dans tous les prompts** des agents
+- `local_path` devient le **répertoire de travail** des agents locaux (PM, Architect) — ils voient et lisent le vrai code source
+- `repo` + `branch` définissent la cible des agents cloud (Dev, QA, Red Team)
 
 ### Ajouter un nouveau projet
 
 1. Copie `projects/_template.md` en `projects/monprojet.md`
-2. Remplis le frontmatter YAML (name, repo, branch)
+2. Remplis le frontmatter YAML : `name`, `repo`, `branch`, et `local_path` (chemin vers le repo cloné localement — permet aux agents locaux de lire le vrai code source)
 3. Ajoute les sections : Stack technique, Conventions, Déploiement, Contraintes
-4. Ajoute un script npm dans `package.json` si voulu
-5. Lance l’outil avec le projet chargé, par ex. : `npm run start -- --project projects/monprojet.md --role pm "…"` (équivalent : `tsx src/orchestrator.ts --project projects/monprojet.md --role pm "…"`)
+4. Lance : `npm run start -- --project projects/monprojet.md --role pm "..."`
+
+> `projects/*.md` sont dans `.gitignore` (sauf `_template.md`) — tes informations de projet restent locales.
 
 ## 🎯 Comment ça marche
 
@@ -165,18 +172,14 @@ génériques et capables de s'adapter à n'importe quelle stack.
 Lance un seul agent pour une tâche spécifique :
 
 ```bash
-# Sans projet spécifique (utilise .env)
-npm run agent:pm "Je veux un dashboard de statistiques"
-
-# Avec projet spécifique (utilise projects/dataset-style.md)
-npm run project:dataset-style -- --role pm "Je veux un dashboard de statistiques"
-
-# Autres agents
-npm run agent:ux "Esquisse les parcours pour l’upload CSV"
-npm run project:dataset-style -- --role architect "Conçois le schéma BDD"
-npm run project:dataset-style -- --role dev "Implémente la page"
-npm run project:dataset-style -- --role qa "Review la PR #12"
-npm run project:dataset-style -- --role redteam "Audite la sécurité"
+# --project est obligatoire (la sortie est sauvegardée dans last-run/<slug>/<role>.md)
+npm run start -- --project projects/monprojet.md --role pm "Je veux un dashboard de statistiques"
+npm run start -- --project projects/monprojet.md --role architect "Conçois le schéma BDD"
+npm run start -- --project projects/monprojet.md --role dev "Implémente la page"
+npm run start -- --project projects/monprojet.md --role qa "Review la PR #12"
+npm run start -- --project projects/monprojet.md --role redteam "Audite la sécurité"
+npm run start -- --project projects/monprojet.md --role ux "Esquisse les parcours"
+npm run start -- --project projects/monprojet.md --role devops "Propose la CI"
 ```
 
 ### Mode pipeline complet
@@ -184,32 +187,30 @@ npm run project:dataset-style -- --role redteam "Audite la sécurité"
 Lance les 5 agents en séquence, chacun recevant le contexte du précédent :
 
 ```bash
-# Sans projet spécifique
-npm run pipeline "Brief de la fonctionnalité complète"
-
-# Avec projet spécifique (+ injectation du contexte dans chaque agent)
-npm run project:dataset-style -- --pipeline full "Brief de la fonctionnalité"
+# --project est obligatoire
+npm run start -- --project projects/monprojet.md --pipeline full "Brief de la fonctionnalité"
 
 # Pipeline avec backlog (prend la prochaine issue dans le backlog)
-npm run project:dataset-style -- --pipeline next
+npm run start -- --project projects/monprojet.md --pipeline next
 ```
 
 **Reprise et fichiers de brief :**
-Après chaque exécution d'un agent, sa sortie est automatiquement sauvegardée dans le dossier `last-run/<role>.md`. Tu peux utiliser ces fichiers pour reprendre le pipeline où tu le souhaites sans repasser par les étapes précédentes.
+Après chaque exécution d’un agent, sa sortie est automatiquement sauvegardée dans `last-run/<slug>/<role>.md` (où `<slug>` est le nom du fichier projet sans `.md`). Ces fichiers permettent de reprendre le pipeline sans repasser par les étapes précédentes.
 
 ```bash
-# Lancer le PM pour explorer et générer le brief (sauvegardé dans last-run/pm.md)
-npm run agent:pm "Brief initial..."
+# Lancer le PM pour générer le brief (sauvegardé dans last-run/monprojet/pm.md)
+npm run start -- --project projects/monprojet.md --role pm "Brief initial..."
 
-# Reprendre le pipeline à partir de l'architecte en utilisant la sortie du PM
-npm run pipeline -- --brief-file last-run/pm.md --resume-from architect
-# → L'étape PM est sautée, l'architecte reçoit le contenu de pm.md comme contexte
+# Reprendre à partir de l’architecte avec la sortie du PM
+npm run start -- --project projects/monprojet.md --pipeline full \
+  --brief-file last-run/monprojet/pm.md --resume-from architect
 
-# Reprendre depuis le dev (ex: après avoir refusé manuellement l'architecture et l'avoir relancée)
-npm run pipeline -- --brief-file last-run/architect.md --resume-from dev
+# Reprendre depuis le dev après avoir ajusté l’architecture manuellement
+npm run start -- --project projects/monprojet.md --pipeline full \
+  --brief-file last-run/monprojet/architect.md --resume-from dev
 ```
 
-**Mode d’exécution :** les étapes **Product Manager** et **Data Architect** tournent en **local** sur le répertoire courant de l’orchestrateur (`cwd`). À partir du **Développeur**, le pipeline utilise **cloud** Cursor contre le repo cible défini dans le fichier projet ou `.env` (`TARGET_REPO_URL`).
+**Mode d’exécution :** les étapes **Product Manager** et **Data Architect** tournent en **local** dans le répertoire défini par `local_path` du fichier projet (ou le cwd de l’orchestrateur si absent). À partir du **Développeur**, le pipeline utilise **cloud** Cursor contre le repo cible défini par `repo:` dans le fichier projet.
 
 Le pipeline inclut une **boucle de feedback** :
 - QA approuve → continue vers RedTeam
@@ -220,9 +221,14 @@ Le pipeline inclut une **boucle de feedback** :
 Le pipeline s'arrête à chaque **checkpoint** pour ta validation
 (via les hooks Cursor).
 
-### Agents hors pipeline (`npm run agent:*`)
+### Agents hors pipeline
 
-Les rôles **`ux`**, **`ui`**, **`devops`**, **`sre`**, **`release`**, **`techwriter`**, **`privacy`** se lancent comme les autres (`npm run agent:devops "…"`, etc., ou `--role <clé>` après `--project …`). Ils ne sont **pas** enchaînés automatiquement après `fullPipeline`.
+Les rôles **`ux`**, **`ui`**, **`devops`**, **`sre`**, **`release`**, **`techwriter`**, **`privacy`** se lancent comme n'importe quel autre agent avec `--role <clé>`. Ils ne sont **pas** enchaînés automatiquement après `fullPipeline`.
+
+```bash
+npm run start -- --project projects/monprojet.md --role devops "Propose la CI GitHub Actions"
+npm run start -- --project projects/monprojet.md --role techwriter "Met à jour le README"
+```
 
 ## 🔐 Chaîne assurance (DevOps / SRE / doc)
 
