@@ -1,12 +1,12 @@
 /**
- * Garde-fou budgétaire : interroge l'API Admin Cursor pour détecter si le seuil
- * de dépenses est atteint et activer le mode frugal (composer-2 pour tous les agents).
+ * Garde-fou budgétaire : décide si le mode frugal doit s'activer.
  *
- * Activation : définir SPEND_ALERT_CENTS dans `.env` (ex: 5000 = $50).
- * Sans cette variable, la vérification est ignorée.
+ * Priorité de décision :
+ * 1) FRUGAL_DEFAULT=true|false (override explicite)
+ * 2) CURSOR_BILLING_MODE=solo -> frugal ON par défaut (sans API spend)
+ * 3) CURSOR_BILLING_MODE=team -> seuil SPEND_ALERT_CENTS via API /teams/spend
  *
- * Une réponse 401 sur `/teams/spend` indique généralement que la clé utilisée ne
- * correspond pas à un compte / rôle ayant droit aux métriques d'équipe (fail-open).
+ * Team sans SPEND_ALERT_CENTS -> frugal OFF.
  */
 
 interface TeamMemberSpend {
@@ -19,6 +19,21 @@ interface TeamMemberSpend {
 
 interface SpendResponse {
   teamMemberSpend: TeamMemberSpend[];
+}
+
+type BillingMode = "solo" | "team";
+
+function parseBoolean(value: string | undefined): boolean | null {
+  const v = value?.trim().toLowerCase();
+  if (!v) return null;
+  if (v === "1" || v === "true" || v === "yes" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "no" || v === "off") return false;
+  return null;
+}
+
+function resolveBillingMode(env: NodeJS.ProcessEnv): BillingMode {
+  const raw = env.CURSOR_BILLING_MODE?.trim().toLowerCase();
+  return raw === "team" ? "team" : "solo";
 }
 
 /**
@@ -69,6 +84,12 @@ export async function fetchSpendCents(
  *   - La dépense actuelle dépasse ce seuil
  */
 export async function checkFrugalMode(env: NodeJS.ProcessEnv): Promise<boolean> {
+  const explicit = parseBoolean(env.FRUGAL_DEFAULT);
+  if (explicit !== null) return explicit;
+
+  const billingMode = resolveBillingMode(env);
+  if (billingMode === "solo") return true;
+
   const alertCents = parseInt(env.SPEND_ALERT_CENTS ?? "", 10);
   if (!alertCents || isNaN(alertCents) || alertCents <= 0) return false;
 

@@ -41,6 +41,7 @@ import {
   pickNextIssue,
 } from "./backlog.js";
 import { detectQAVerdict, detectSecurityVerdict } from "./pipeline-detection.js";
+import { runCloudAgentWithPolicy } from "./cloud-policy.js";
 import type { ProjectContext, PipelineRunStatus } from "./models.js";
 import {
   assertValidProjectContext,
@@ -277,28 +278,35 @@ async function runAgent(
     }
   }
 
-  let agent;
-  try {
-    agent = await Agent.create(agentOptions);
-  } catch (e) {
-    throw new Error(`Impossible de créer l'agent ${role} (${model.id}) : ${formatErrorMessage(e)}`);
-  }
   const roleAndTask = `${prompt}\n\n---\n\n${fullTask}`;
   const taskWithSystemPrompt = projectSection ? `${projectSection}\n\n---\n\n${roleAndTask}` : roleAndTask;
-  let run;
-  try {
-    run = await agent.send(taskWithSystemPrompt);
-  } catch (e) {
-    throw new Error(`Échec de l'envoi de la tâche à l'agent ${role} : ${formatErrorMessage(e)}`);
-  }
 
-  // Attendre la fin et afficher le résultat
-  let runResult;
-  try {
-    runResult = await run.wait();
-  } catch (e) {
-    throw new Error(`L'agent ${role} n'a pas terminé correctement : ${formatErrorMessage(e)}`);
-  }
+  const runOnce = async () => {
+    let agent;
+    try {
+      agent = await Agent.create(agentOptions);
+    } catch (e) {
+      throw new Error(`Impossible de créer l'agent ${role} (${model.id}) : ${formatErrorMessage(e)}`, { cause: e });
+    }
+
+    let run;
+    try {
+      run = await agent.send(taskWithSystemPrompt);
+    } catch (e) {
+      throw new Error(`Échec de l'envoi de la tâche à l'agent ${role} : ${formatErrorMessage(e)}`, { cause: e });
+    }
+
+    try {
+      return await run.wait();
+    } catch (e) {
+      throw new Error(`L'agent ${role} n'a pas terminé correctement : ${formatErrorMessage(e)}`, { cause: e });
+    }
+  };
+
+  const runResult = options.cloud
+    ? await runCloudAgentWithPolicy(runOnce, process.env, `⚠️  cloud-policy (${role}) :`)
+    : await runOnce();
+
   if (runResult.result) {
     console.log(runResult.result);
   } else {
@@ -546,8 +554,8 @@ async function fullPipeline(
   let frugal = await checkFrugalMode(process.env);
   if (frugal) {
     console.warn(
-      "\n⚠️  MODE FRUGAL — Seuil de dépenses atteint (SPEND_ALERT_CENTS).\n" +
-      "   Tous les agents utiliseront composer-2 pour ce run.\n"
+      "\n⚠️  MODE FRUGAL activé pour ce run.\n" +
+      "   (solo par défaut, override FRUGAL_DEFAULT ou seuil Team SPEND_ALERT_CENTS)\n"
     );
   }
 
@@ -630,7 +638,7 @@ async function fullPipeline(
   if (startIdx <= 2) {
     console.log("\n💻 ÉTAPE 3/5 — Développeur Full-Stack");
     frugal = frugal || await checkFrugalMode(process.env);
-    if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape (seuil SPEND_ALERT_CENTS atteint).");
+    if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
   }
   let implementation = startIdx <= 2
     ? await runAgent(
@@ -652,7 +660,7 @@ async function fullPipeline(
       qaIteration++;
       console.log(`\n🧪 ÉTAPE 4/5 — QA Engineer — itération ${qaIteration}/${maxQAIterations}`);
       frugal = frugal || await checkFrugalMode(process.env);
-      if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape (seuil SPEND_ALERT_CENTS atteint).");
+      if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
 
       const qaPrompt = qaIteration === 1
         ? "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité aux specs."
@@ -683,7 +691,7 @@ async function fullPipeline(
       } else if (qaIteration < maxQAIterations) {
         console.log("🔄 QA DEMANDE DES CHANGEMENTS — Relance du développeur.\n");
         frugal = frugal || await checkFrugalMode(process.env);
-        if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape (seuil SPEND_ALERT_CENTS atteint).");
+        if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
 
         implementation = await runAgent(
           "dev",
@@ -713,7 +721,7 @@ async function fullPipeline(
     rtIteration++;
     console.log(`\n🔴 ÉTAPE 5/5 — Red Team — itération ${rtIteration}/${maxRTIterations}`);
     frugal = frugal || await checkFrugalMode(process.env);
-    if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape (seuil SPEND_ALERT_CENTS atteint).");
+    if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
 
     const rtPrompt = rtIteration === 1
       ? "Audite le code de la PR pour les vulnérabilités de sécurité."

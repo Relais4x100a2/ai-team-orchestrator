@@ -19,7 +19,10 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
   - `CURSOR_API_KEY` — obligatoire pour lancer les agents
   - `TARGET_REPO_URL`, `TARGET_BRANCH` — fallback si pas de `--project` (mode cloud)
   - `GITHUB_TOKEN` — pour `--sync-issues` (API Issues) et, si `GITHUB_CLOSE_ISSUE_ON_PIPELINE_DONE=1` (opt-in), fermeture automatique de l’issue GitHub après un `pipeline next` réussi (`src/github-sync.ts`, `src/orchestrator.ts`)
-  - `SPEND_ALERT_CENTS` — seuil en centimes ; au-delà, **mode frugal** : tous les agents utilisent `composer-2` (`src/spend-guard.ts`). Optionnel : `SPEND_CHECK_EMAIL` pour filtrer la dépense par utilisateur.
+  - `CURSOR_BILLING_MODE` — `solo` (défaut recommandé Pro/Pro+/Ultra) ou `team`.
+  - `FRUGAL_DEFAULT` — override explicite (`true|false`) du mode frugal.
+  - `SPEND_ALERT_CENTS` — seuil Team (centimes) ; au-delà, **mode frugal** : tous les agents utilisent `composer-2` (`src/spend-guard.ts`). Optionnel : `SPEND_CHECK_EMAIL` pour filtrer la dépense par utilisateur.
+  - `CLOUD_AGENT_COOLDOWN_MS`, `CLOUD_AGENT_MAX_RETRIES` — pacing et retries cloud (anti-burst) dans `src/cloud-policy.ts`.
 
 ## Agents : clés CLI (`--role`) ⇄ fichier prompt
 
