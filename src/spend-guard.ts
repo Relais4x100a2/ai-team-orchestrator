@@ -2,8 +2,11 @@
  * Garde-fou budgétaire : interroge l'API Admin Cursor pour détecter si le seuil
  * de dépenses est atteint et activer le mode frugal (composer-2 pour tous les agents).
  *
- * Activation : définir SPEND_ALERT_CENTS dans .env (ex: 5000 = $50).
+ * Activation : définir SPEND_ALERT_CENTS dans `.env` (ex: 5000 = $50).
  * Sans cette variable, la vérification est ignorée.
+ *
+ * Une réponse 401 sur `/teams/spend` indique généralement que la clé utilisée ne
+ * correspond pas à un compte / rôle ayant droit aux métriques d'équipe (fail-open).
  */
 
 interface TeamMemberSpend {

@@ -101,10 +101,11 @@ const AGENT_DEFINITIONS = {
     promptFile: "red-team",
     description: "Red Team — audit de sécurité",
     tier: "strong" as const,
-    // composer-2 sans fast ; thinking:true si exposé par le backend (sinon ignoré)
+    // composer-2 : uniquement le param `fast` est une variante connue côté API Agents
+    // (`thinking` sur composer-2 provoque invalid_model).
     defaultModel: {
       id: "composer-2",
-      params: [{ id: "thinking", value: "true" }],
+      params: [{ id: "fast", value: "false" }],
     } satisfies ModelSelection,
   },
 
@@ -192,11 +193,6 @@ const COMPOSER_SLOW: ModelSelection = {
   params: [{ id: "fast", value: "false" }],
 };
 
-const COMPOSER_THINK: ModelSelection = {
-  id: "composer-2",
-  params: [{ id: "thinking", value: "true" }],
-};
-
 const HAIKU_PM: ModelSelection = {
   id: "claude-haiku-4-5",
   params: [{ id: "context", value: "200k" }],
@@ -249,7 +245,7 @@ function modelForRoleAndIssueSize(role: AgentRole, size: IssueSize): ModelSelect
     case "qa":
       return size === "XL" ? COMPOSER_SLOW : COMPOSER_FAST;
     case "redteam":
-      return size === "XL" ? REDTEAM_SONNET : COMPOSER_THINK;
+      return size === "XL" ? REDTEAM_SONNET : COMPOSER_SLOW;
     default:
       return AGENT_DEFINITIONS[role].defaultModel as ModelSelection;
   }
@@ -280,7 +276,9 @@ export function resolveRunModel(
       ? env.MODEL_STRONG?.trim() || undefined
       : env.MODEL_FAST?.trim() || undefined;
 
-  return resolveModel(base, perRoleTrimmed, tierEnv);
+  const resolved = resolveModel(base, perRoleTrimmed, tierEnv);
+
+  return resolved;
 }
 
 export type AgentRoleConfig = {

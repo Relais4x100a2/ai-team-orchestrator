@@ -32,6 +32,7 @@ describe("createAgentConfig", () => {
     assert.ok(Array.isArray(cfg.pm.model.params) && cfg.pm.model.params!.length > 0);
     assert.strictEqual(cfg.dev.model.id, "composer-2");
     assert.strictEqual(cfg.redteam.model.id, "composer-2");
+    assert.ok(cfg.redteam.model.params?.some(p => p.id === "fast" && p.value === "false"));
   });
 
   it("MODEL_<ROLE> surcharge le modèle d'un rôle précis (sans params)", () => {
@@ -89,6 +90,15 @@ describe("resolveRunModel", () => {
     const pm = resolveRunModel("pm", { issueSize: "L", frugal: false, env: {} });
     assert.strictEqual(pm.id, "claude-sonnet-4-5");
     assert.ok(pm.params?.some(p => p.id === "thinking" && p.value === "false"));
+  });
+
+  it("redteam hors XL → composer-2 avec fast:false (thinking sur composer invalide pour l'API)", () => {
+    const rt = resolveRunModel("redteam", { issueSize: "S", frugal: false, env: {} });
+    assert.strictEqual(rt.id, "composer-2");
+    assert.ok(rt.params?.some(p => p.id === "fast" && p.value === "false"));
+    const rtl = resolveRunModel("redteam", { issueSize: "L", frugal: false, env: {} });
+    assert.strictEqual(rtl.id, "composer-2");
+    assert.ok(rtl.params?.some(p => p.id === "fast" && p.value === "false"));
   });
 
   it("taille XL (architect Opus, dev/qa Composer slow, redteam Sonnet)", () => {
