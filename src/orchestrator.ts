@@ -282,7 +282,7 @@ async function runAgent(
   const taskWithSystemPrompt = projectSection ? `${projectSection}\n\n---\n\n${roleAndTask}` : roleAndTask;
 
   const runOnce = async () => {
-    let agent;
+    let agent: Awaited<ReturnType<typeof Agent.create>> | null = null;
     try {
       agent = await Agent.create(agentOptions);
     } catch (e) {
@@ -300,6 +300,19 @@ async function runAgent(
       return await run.wait();
     } catch (e) {
       throw new Error(`L'agent ${role} n'a pas terminé correctement : ${formatErrorMessage(e)}`, { cause: e });
+    } finally {
+      // Évite l'accumulation de listeners AbortSignal entre runs successifs.
+      try {
+        const disposable = agent as { [Symbol.asyncDispose]?: () => Promise<void> } | null;
+        const asyncDispose = disposable?.[Symbol.asyncDispose];
+        if (typeof asyncDispose === "function") {
+          await asyncDispose.call(disposable);
+        } else if (agent && "close" in agent && typeof agent.close === "function") {
+          agent.close();
+        }
+      } catch (disposeErr) {
+        console.warn(`⚠️  Nettoyage agent (${role}) incomplet : ${formatErrorMessage(disposeErr)}`);
+      }
     }
   };
 
