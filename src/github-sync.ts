@@ -1,8 +1,10 @@
 /**
- * Synchronisation backlog.json → GitHub Issues.
+ * Synchronisation backlog.json ↔ GitHub Issues.
  *
  * Pour chaque issue sans githubIssueNumber, crée une Issue GitHub
  * et met à jour backlog.json avec le numéro obtenu.
+ *
+ * Fermeture optionnelle après `pipeline next` : `closeGitHubIssueWithComment` (opt-in env).
  *
  * Prérequis : GITHUB_TOKEN dans .env, repo GitHub dans le fichier projet.
  */
@@ -14,6 +16,21 @@ export function extractOwnerRepo(repoUrl: string): string {
   const match = repoUrl.match(/github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/);
   if (!match) throw new Error(`URL GitHub non reconnue : ${repoUrl}`);
   return match[1];
+}
+
+/** En-têtes communs REST GitHub v2022-11-28 (création d’issue, commentaires, fermeture). */
+export function githubApiHeaders(token: string): HeadersInit {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+}
+
+function summarizeGithubErrorBody(raw: string, max = 280): string {
+  const compact = raw.replace(/\s+/g, " ").trim();
+  return compact.length <= max ? compact : `${compact.slice(0, max - 1)}…`;
 }
 
 function issueBody(issue: BacklogIssue): string {
@@ -47,12 +64,7 @@ async function createGitHubIssue(
   const url = `https://api.github.com/repos/${ownerRepo}/issues`;
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "Content-Type": "application/json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
+    headers: githubApiHeaders(token),
     body: JSON.stringify({
       title: `[${issue.id}] ${issue.title}`,
       body: issueBody(issue),
@@ -67,6 +79,117 @@ async function createGitHubIssue(
 
   const data = (await res.json()) as { number: number };
   return data.number;
+}
+
+const GITHUB_REST = "https://api.github.com/repos";
+
+/**
+ * POST commentaire sur une issue.
+ * En cas d'échec HTTP : log d'avertissement uniquement (pas de throw).
+ */
+export async function postIssueComment(
+  ownerRepo: string,
+  token: string,
+  issueNumber: number,
+  body: string,
+): Promise<boolean> {
+  const url = `${GITHUB_REST}/${ownerRepo}/issues/${issueNumber}/comments`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: githubApiHeaders(token),
+    body: JSON.stringify({ body }),
+  });
+  if (!res.ok) {
+    console.warn(
+      `GitHub: commentaire sur #${issueNumber} échoué (${res.status}) — ${summarizeGithubErrorBody(await res.text())}`,
+    );
+    return false;
+  }
+  return true;
+}
+
+/**
+ * PATCH — ferme une issue (`state_reason` type GitHub).
+ * @returns true si la fermeture a réussi
+ */
+export async function closeGitHubIssue(
+  ownerRepo: string,
+  token: string,
+  issueNumber: number,
+  stateReason: "completed" | "not_planned" = "completed",
+): Promise<boolean> {
+  const url = `${GITHUB_REST}/${ownerRepo}/issues/${issueNumber}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: githubApiHeaders(token),
+    body: JSON.stringify({
+      state: "closed",
+      state_reason: stateReason,
+    }),
+  });
+  if (!res.ok) {
+    console.warn(
+      `GitHub: fermeture issue #${issueNumber} échouée (${res.status}) — ${summarizeGithubErrorBody(await res.text())}`,
+    );
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Après pipeline réussi : GET (idempotence) → PATCH fermeture si encore ouverte → POST commentaire.
+ * Fail-open : avertissements / logs, jamais de throw.
+ */
+export async function closeGitHubIssueWithComment(
+  repoUrl: string,
+  token: string,
+  issueNumber: number,
+  commentBody: string,
+): Promise<void> {
+  let ownerRepo: string;
+  try {
+    ownerRepo = extractOwnerRepo(repoUrl);
+  } catch (e) {
+    console.warn(`GitHub fermeture auto : ${(e as Error).message}`);
+    return;
+  }
+
+  const issueUrl = `${GITHUB_REST}/${ownerRepo}/issues/${issueNumber}`;
+  const headers = githubApiHeaders(token);
+
+  const getRes = await fetch(issueUrl, { headers });
+  if (getRes.status === 404) {
+    console.warn(`GitHub: issue #${issueNumber} introuvable (404) — fermeture ignorée.`);
+    return;
+  }
+  if (!getRes.ok) {
+    console.warn(
+      `GitHub: lecture issue #${issueNumber} impossible (${getRes.status}) — ${summarizeGithubErrorBody(await getRes.text())}`,
+    );
+    return;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = await getRes.json();
+  } catch {
+    console.warn(`GitHub: réponse JSON invalide pour issue #${issueNumber} — fermeture ignorée.`);
+    return;
+  }
+
+  const state =
+    typeof parsed === "object" && parsed !== null && "state" in parsed
+      ? String((parsed as { state: unknown }).state)
+      : "";
+  if (state === "closed") {
+    console.log(`GitHub: issue #${issueNumber} déjà fermée — rien à faire.`);
+    return;
+  }
+
+  const ok = await closeGitHubIssue(ownerRepo, token, issueNumber, "completed");
+  if (!ok) return;
+
+  await postIssueComment(ownerRepo, token, issueNumber, commentBody);
 }
 
 /**

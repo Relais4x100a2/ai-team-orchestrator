@@ -33,7 +33,7 @@ import {
   type PipelineStep,
 } from "./agent-config.js";
 import { checkFrugalMode } from "./spend-guard.js";
-import { syncBacklogToGitHub } from "./github-sync.js";
+import { closeGitHubIssueWithComment, syncBacklogToGitHub } from "./github-sync.js";
 import type { Backlog, BacklogIssue, IssuePriority, IssueSize, IssueStatus } from "./backlog.js";
 import {
   generateIssueId,
@@ -78,6 +78,20 @@ function formatErrorMessage(error: unknown): string {
 function previewText(text: string, maxLength = 120): string {
   const compact = text.replace(/\s+/g, " ").trim();
   return compact.length <= maxLength ? compact : `${compact.slice(0, maxLength - 1)}…`;
+}
+
+/** Opt-in : `GITHUB_CLOSE_ISSUE_ON_PIPELINE_DONE=1|true|yes` */
+function isGithubCloseIssueOnPipelineDoneEnabled(): boolean {
+  const v = process.env.GITHUB_CLOSE_ISSUE_ON_PIPELINE_DONE?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+function githubPipelineCloseComment(issue: BacklogIssue): string {
+  return [
+    "Fermé automatiquement après `pipeline next` réussi (ai-team-orchestrator).",
+    `- Backlog id : \`${issue.id}\``,
+    `- pipelineRun : \`${issue.pipelineRun ?? "—"}\``,
+  ].join("\n");
 }
 
 function resolveUserPath(inputPath: string): { absolutePath: string; displayPath: string } {
@@ -462,6 +476,22 @@ async function pipelineNext() {
     freshIssue.completedAt = new Date().toISOString();
     freshIssue.updatedAt = new Date().toISOString();
     saveBacklog(freshBacklog);
+
+    const ghNum = freshIssue.githubIssueNumber;
+    const repo = activeProject?.repo?.trim();
+    const ghToken = process.env.GITHUB_TOKEN?.trim();
+    if (
+      isGithubCloseIssueOnPipelineDoneEnabled() &&
+      ghNum != null &&
+      repo &&
+      ghToken
+    ) {
+      try {
+        await closeGitHubIssueWithComment(repo, ghToken, ghNum, githubPipelineCloseComment(freshIssue));
+      } catch (e) {
+        console.warn(`GitHub fermeture automatique : ${formatErrorMessage(e)}`);
+      }
+    }
 
     console.log(`\n✅ Issue ${issue.id} marquée DONE dans backlog.json`);
   } catch (err) {

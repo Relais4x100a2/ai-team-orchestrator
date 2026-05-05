@@ -18,7 +18,7 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
 - **Variables `.env` utiles**
   - `CURSOR_API_KEY` — obligatoire pour lancer les agents
   - `TARGET_REPO_URL`, `TARGET_BRANCH` — fallback si pas de `--project` (mode cloud)
-  - `GITHUB_TOKEN` — pour `--sync-issues` (API Issues)
+  - `GITHUB_TOKEN` — pour `--sync-issues` (API Issues) et, si `GITHUB_CLOSE_ISSUE_ON_PIPELINE_DONE=1` (opt-in), fermeture automatique de l’issue GitHub après un `pipeline next` réussi (`src/github-sync.ts`, `src/orchestrator.ts`)
   - `SPEND_ALERT_CENTS` — seuil en centimes ; au-delà, **mode frugal** : tous les agents utilisent `composer-2` (`src/spend-guard.ts`). Optionnel : `SPEND_CHECK_EMAIL` pour filtrer la dépense par utilisateur.
 
 ## Agents : clés CLI (`--role`) ⇄ fichier prompt
