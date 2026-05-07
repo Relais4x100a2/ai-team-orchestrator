@@ -248,6 +248,8 @@ Le pipeline inclut une **boucle de feedback** :
 - QA demande changements → relance Dev, puis re-review (max 3 itérations)
 - Après retouche Dev issue de QA, la sécurité est re-challengée avant la QA suivante
 
+Le rapport de l’agent sécurité doit se terminer par une ligne **`VERDICT SÉCURITÉ: APPROVED|MEDIUM|CRITICAL`** (voir `src/prompts/red-team.md`) pour que le pipeline classe le verdict sans ambiguïté. L’orchestrateur injecte aussi la **branche cible** et les URLs `run-context.json` dans le contexte d’audit.
+
 Le pipeline s'arrête à chaque **checkpoint** pour ta validation
 (via les hooks Cursor).
 

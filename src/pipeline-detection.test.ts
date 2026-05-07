@@ -127,4 +127,45 @@ describe("detectSecurityVerdict", () => {
 1. Risque modéré de configuration.`;
     assert.strictEqual(detectSecurityVerdict(report), "MEDIUM_ISSUES");
   });
+
+  it("n'escalade pas si « Aucune critique nouvelle bloquante » dans la section critique", () => {
+    const report = `### Vulnérabilités critiques (à corriger immédiatement)
+
+1. **Aucune critique nouvelle bloquante** par rapport au périmètre corrigé.
+
+### Vulnérabilités moyennes (à planifier)
+
+1. Point mineur.`;
+    assert.strictEqual(detectSecurityVerdict(report), "MEDIUM_ISSUES");
+  });
+
+  it("priorise la ligne VERDICT SÉCURITÉ sur le reste du texte", () => {
+    assert.strictEqual(
+      detectSecurityVerdict(
+        "Blabla vulnérabilités critiques dans un titre sans liste.\n\nVERDICT SÉCURITÉ: APPROVED\n"
+      ),
+      "APPROVED"
+    );
+    assert.strictEqual(
+      detectSecurityVerdict(
+        "Rapport.\nVERDICT SÉCURITÉ: MEDIUM\n"
+      ),
+      "MEDIUM_ISSUES"
+    );
+    assert.strictEqual(
+      detectSecurityVerdict(
+        "Rapport.\nSECURITY_VERDICT: CRITICAL\n"
+      ),
+      "CRITICAL_ISSUES"
+    );
+  });
+
+  it("utilise la dernière ligne VERDICT SÉCURITÉ si plusieurs", () => {
+    assert.strictEqual(
+      detectSecurityVerdict(
+        "VERDICT SÉCURITÉ: CRITICAL\n\nVERDICT SÉCURITÉ: APPROVED\n"
+      ),
+      "APPROVED"
+    );
+  });
 });

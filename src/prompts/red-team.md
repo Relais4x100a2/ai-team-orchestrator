@@ -50,6 +50,18 @@ Selon la stack du projet :
 [ce qui est déjà bien fait côté sécurité]
 ```
 
+## Verdict machine (obligatoire)
+
+En **toute dernière ligne** du rapport (une seule ligne, sans markdown autour), ajoute **exactement** une des formes suivantes pour que le pipeline interprète correctement ton audit :
+
+- `VERDICT SÉCURITÉ: APPROVED` — aucun blocage critique ; éventuellement des points moyens déjà décrits dans le rapport.
+- `VERDICT SÉCURITÉ: MEDIUM` — pas de critique bloquante, mais des vulnérabilités ou risques **moyens** à traiter ou documenter avant merge.
+- `VERDICT SÉCURITÉ: CRITICAL` — au moins une vulnérabilité **critique** ou un risque **bloquant** pour la mise en production ; le développeur sera relancé.
+
+Équivalents acceptés : `SECURITY_VERDICT: APPROVED|MEDIUM|CRITICAL` (anglais).
+
+Si tu utilises les titres avec emojis ci-dessus (`🚨` / `⚠️`), le pipeline peut aussi déduire le niveau, mais la ligne **VERDICT SÉCURITÉ** reste **obligatoire** pour éviter les ambiguïtés.
+
 ## Règles
 
 - Tu ne fournis JAMAIS d'exploit fonctionnel complet. Tu décris le vecteur

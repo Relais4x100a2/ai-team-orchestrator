@@ -107,7 +107,7 @@ tsx src/orchestrator.ts --project projects/mon-projet.md --sync-issues
 - `src/agent-config.ts` — `AGENT_DEFINITIONS`, `promptFile`, résolution des modèles (`createAgentConfig`)
 - `src/models.ts` — Types partagés (`ProjectContext`, backlog, pipeline runs, parsing JSON)
 - `src/backlog.ts` — Parse sortie PM + sélection prochaine issue (`pickNextIssue`)
-- `src/pipeline-detection.ts` — Heuristiques `detectQAVerdict` / `detectSecurityVerdict`
+- `src/pipeline-detection.ts` — Heuristiques `detectQAVerdict` / `detectSecurityVerdict` (ligne finale `VERDICT SÉCURITÉ:` prioritaire pour la sécurité)
 - `src/pipeline-runs.ts` — Persistance des exécutions dans `pipeline-runs.json` (racine du repo)
 - `src/github-sync.ts` — Création des issues GitHub depuis le backlog (`--sync-issues`)
 - `src/spend-guard.ts` — Mode frugal selon `SPEND_ALERT_CENTS`

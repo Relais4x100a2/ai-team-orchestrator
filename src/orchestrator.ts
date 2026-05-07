@@ -216,6 +216,40 @@ function loadLastRunContext(lastRunDir: string): LastRunContext | null {
   }
 }
 
+/** Contexte injecté avant la sortie dev pour cadrer l'audit cloud sur la bonne branche / PR. */
+function buildSecurityImplementationContext(implementationMarkdown: string): string {
+  const repo =
+    activeProject?.repo?.trim() ||
+    process.env.TARGET_REPO_URL?.trim() ||
+    "—";
+  const branch =
+    activeProject?.branch?.trim() ||
+    process.env.TARGET_BRANCH?.trim() ||
+    "—";
+  let branchUrlLine = "—";
+  let prUrlLine = "—";
+  if (activeProjectSlug) {
+    const ctx = loadLastRunContext(resolveLastRunDir());
+    if (ctx?.latestBranchUrl) branchUrlLine = ctx.latestBranchUrl;
+    if (ctx?.latestPrUrl) prUrlLine = ctx.latestPrUrl;
+  }
+
+  return [
+    "## Cible d'audit (pipeline)",
+    "",
+    `- **Dépôt** : ${repo}`,
+    `- **Branche Git cloud (\`startingRef\`)** : ${branch}`,
+    `- **Dernière URL branche (last-run/run-context.json)** : ${branchUrlLine}`,
+    `- **Dernière URL PR (last-run/run-context.json)** : ${prUrlLine}`,
+    "",
+    "**Consigne** : audite le code et le diff de **cette branche / cette PR** dans l'environnement cloud Cursor. Si le workspace local ne reflète pas cette branche, indique-le dans le rapport mais base ton verdict sur **l'arbre distant** aligné avec la cible ci-dessus.",
+    "",
+    "## Sortie développeur / contexte implémentation",
+    "",
+    implementationMarkdown,
+  ].join("\n");
+}
+
 function extractBranchFromGitHubBranchUrl(url: string | undefined): string | undefined {
   if (!url) return undefined;
   const match = url.match(/\/tree\/([^?#\s]+)/i);
@@ -1056,7 +1090,7 @@ async function fullPipeline(
           "security",
           securityPrompt,
           {
-            additionalContext: implementation,
+            additionalContext: buildSecurityImplementationContext(implementation),
             cloud: true,
             frugal,
             issueSize: pipelineIssueSize,
@@ -1064,6 +1098,7 @@ async function fullPipeline(
         );
 
         const securityVerdict = detectSecurityVerdict(securityReport);
+        console.log(`   📋 Verdict sécurité (détecté) : ${securityVerdict}`);
         if (securityVerdict === "APPROVED") {
           securityApproved = true;
           console.log("✅ Sécurité approuvée — passage à QA.\n");
@@ -1156,7 +1191,7 @@ async function fullPipeline(
         "security",
         "Re-vérifie rapidement les impacts sécurité après corrections demandées par QA.",
         {
-          additionalContext: implementation,
+          additionalContext: buildSecurityImplementationContext(implementation),
           cloud: true,
           frugal,
           issueSize: pipelineIssueSize,
@@ -1164,6 +1199,7 @@ async function fullPipeline(
       );
       securityReport = securityAfterQaFix;
       const securityVerdict = detectSecurityVerdict(securityAfterQaFix);
+      console.log(`   📋 Verdict sécurité (détecté) : ${securityVerdict}`);
       if (securityVerdict === "CRITICAL_ISSUES") {
         implementation = await runAgent(
           "dev",

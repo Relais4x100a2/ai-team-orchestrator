@@ -2,8 +2,11 @@
  * Heuristiques minimales pour interpréter les rapports QA / Sécurité dans le pipeline.
  *
  * Détection QA (bilingue) : ligne explicite `VERDICT: …`, bloc « ### … Verdict »,
- * puis motifs EN/FR dans le corps (hors blocs ```) — évite les faux positifs sur
- * citations/code, et sur les formulations négées via l’analyse préférentielle du bloc verdict.
+ * puis motifs EN/FR dans le corps (hors blocs ```).
+ *
+ * Détection sécurité : ligne prioritaire `VERDICT SÉCURITÉ:` / `SECURITY_VERDICT:`,
+ * puis sections « vulnérabilités critiques/moyennes » avec négations explicites
+ * (ex. « Aucune identifiée », « Aucune critique nouvelle bloquante »).
  */
 
 export type QAVerdict = "APPROVE" | "REQUEST_CHANGES";
@@ -11,6 +14,10 @@ export type QAVerdict = "APPROVE" | "REQUEST_CHANGES";
 export type SecurityVerdict = "APPROVED" | "CRITICAL_ISSUES" | "MEDIUM_ISSUES";
 
 const VERDICT_LINE = /^\s*VERDICT\s*[:：]\s*(.+)$/gim;
+
+/** Ligne machine lisible en fin de rapport sécurité (prioritaire sur les heuristiques). */
+const SECURITY_VERDICT_LINE =
+  /^\s*(?:VERDICT\s*S[ÉE]CURIT[ÉE]|SECURITY_VERDICT|SECURITY\s+VERDICT)\s*[:：]\s*(.+)$/gim;
 
 /** Découpe Markdown (blocs ``` ... ```) pour le scan « corps complet » — évite les faux REQUEST_CHANGES dans citations / extraits de code. */
 function stripMarkdownFencedCodeBlocks(markdown: string): string {
@@ -135,9 +142,48 @@ function hasExplicitNoCriticalSignal(section: string): boolean {
     /\baucune?\s+identifiee\b/.test(n) ||
     /\baucune?\s+detectee\b/.test(n) ||
     /\baucune?\s+trouvee\b/.test(n) ||
+    /\baucune?\s+critique\s+nouvelle\b/.test(n) ||
+    /\baucune?\s+nouvelle\s+critique\b/.test(n) ||
+    /\baucune?\s+critique\s+bloquante\b/.test(n) ||
+    /\bpas\s+de\s+critique\s+bloquante\b/.test(n) ||
+    /\baucune\s+critique\s+nouvelle\s+bloquante\b/.test(n) ||
     /\bno\s+critical\s+vulnerabilit(?:y|ies)\b/.test(n) ||
     /\bnone\s+(?:identified|detected|found)\b/.test(n)
   );
+}
+
+function mapSecurityVerdictToken(raw: string): SecurityVerdict | null {
+  const t = normalizeAccents(raw.trim().replace(/[`_*]/g, "")).replace(/\s+/g, " ");
+  if (!t) return null;
+  if (/\bnon\s+approuve|\bpas\s+approuve|\breject/.test(t)) return null;
+
+  if (/\bmedium_issues\b/.test(t) || /\bmedium\b/.test(t) || /\bmoyen(ne)?s?\b/.test(t) || /\bmoyenne\b/.test(t)) {
+    return "MEDIUM_ISSUES";
+  }
+  if (
+    /\bcritical_issues\b/.test(t) ||
+    /\bcritical\b/.test(t) ||
+    /\bbloquant/.test(t) ||
+    t === "critique"
+  ) {
+    return "CRITICAL_ISSUES";
+  }
+  if (/\bapproved\b/.test(t) || /\bapprouve\b/.test(t) || t === "ok" || t === "pass" || /\baccepte\b/.test(t)) {
+    return "APPROVED";
+  }
+  return null;
+}
+
+/** Dernière directive explicite du rapport (la fin du fichier est recommandée dans le prompt). */
+function securityVerdictFromDirectiveLine(securityReport: string): SecurityVerdict | null {
+  SECURITY_VERDICT_LINE.lastIndex = 0;
+  let last: SecurityVerdict | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = SECURITY_VERDICT_LINE.exec(securityReport)) !== null) {
+    const mapped = mapSecurityVerdictToken(m[1]!);
+    if (mapped) last = mapped;
+  }
+  return last;
 }
 
 /** Déduit si QA approuve ou demande des changements à partir du texte du rapport. */
@@ -168,6 +214,9 @@ export function detectQAVerdict(qaReport: string): QAVerdict {
 
 /** Déduit le niveau d’alerte sécurité à partir du texte du rapport Sécurité. */
 export function detectSecurityVerdict(securityReport: string): SecurityVerdict {
+  const fromDirective = securityVerdictFromDirectiveLine(securityReport);
+  if (fromDirective) return fromDirective;
+
   const bodySansBlocsCode = stripMarkdownFencedCodeBlocks(securityReport);
   const lowerReport = bodySansBlocsCode.toLowerCase();
 
