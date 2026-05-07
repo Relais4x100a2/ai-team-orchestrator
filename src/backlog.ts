@@ -5,6 +5,7 @@
 export type IssueStatus = "todo" | "in_progress" | "done" | "skipped";
 export type IssuePriority = "MUST" | "SHOULD" | "COULD" | "WONT";
 export type IssueSize = "S" | "M" | "L" | "XL";
+export type IssueSource = "top_down" | "bottom_up";
 
 export interface BacklogIssue {
   id: string;
@@ -18,6 +19,11 @@ export interface BacklogIssue {
   completedAt: string | null;
   pipelineRun: string | null;
   githubIssueNumber?: number;
+  source?: IssueSource;
+  architectureVision?: string;
+  architectureAlternative?: string;
+  architectureRisks?: string;
+  reflectionChallenge?: string;
 }
 
 export interface Backlog {
@@ -71,6 +77,9 @@ export function parsePMOutput(pmOutput: string): ParsedIssueDraft[] {
       status: "todo",
       priority,
       size,
+      source: /\bbottom[-\s]?up\b|\bfeedback\b|\btesteur\b|\bincident\b/i.test(block)
+        ? "bottom_up"
+        : "top_down",
     });
   }
 

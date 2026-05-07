@@ -39,6 +39,7 @@ Structure indicative (adapter au projet) :
 - **Pas de secrets en dur** ; configuration externalisée comme prévu par la stack.
 - **Un commit = un changement logique**. Messages dans la langue et le format définis par le projet ; sinon format conventionnel en anglais : `feat:` / `fix:` / etc.
 - **Tests** pour la logique métier : au minimum happy path + un cas limite pertinent, avec l'outil de test du projet.
+- **Couverture de tests** : à chaque commit, la couverture ne doit jamais régresser. Sans objectif explicite donné dans la tâche/projet, viser une légère hausse mesurable (par défaut +0,1 point absolu quand faisable).
 - **Dépendances** : fichier de manifests du projet (`package.json`, `requirements.txt`, `Cargo.toml`, etc.) tenu à jour.
 - **Conteneur / build** : si le projet utilise Docker ou une CI, vérifie que les changements respectent encore le build/documentation associés.
 - **Infra-as-code ou PaaS** : ne modifie les fichiers de déploiement (compose, Helm, définitions plateforme, etc.) qu'en cohérence avec le fichier projet ou un accord explicite.

@@ -72,6 +72,35 @@ describe("parsePipelineRunsFile", () => {
     });
     assert.equal(file.runs[0].id, "run-1");
   });
+
+  it("accepte les nouvelles étapes resumeFrom (security, redteam_reflection)", () => {
+    const file = parsePipelineRunsFile({
+      version: 1,
+      runs: [
+        {
+          id: "run-2",
+          brief: "x",
+          resumeFrom: "security",
+          qaIterations: 1,
+          securityIterations: 2,
+          status: "partial",
+          startedAt: "2026-05-01T12:00:00.000Z",
+          finishedAt: "2026-05-01T12:01:00.000Z",
+        },
+        {
+          id: "run-3",
+          brief: "y",
+          resumeFrom: "redteam_reflection",
+          qaIterations: 0,
+          securityIterations: 0,
+          status: "success",
+          startedAt: "2026-05-01T12:00:00.000Z",
+          finishedAt: "2026-05-01T12:01:00.000Z",
+        },
+      ],
+    });
+    assert.equal(file.runs.length, 2);
+  });
 });
 
 describe("resolveBriefFilePath", () => {

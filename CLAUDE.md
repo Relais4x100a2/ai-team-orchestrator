@@ -5,7 +5,7 @@
 Ceci est un orchestrateur d'équipe de dev IA. Il utilise le Cursor SDK
 pour piloter des agents spécialisés sur un repo GitHub cible.
 
-**Pipeline par défaut (`full`) :** PM → architecte → dev ⇄ QA ⇄ red team.
+**Pipeline par défaut (`full`) :** PM → architecte → red team réflexion → dev ⇄ sécurité ⇄ QA (sécurité avant QA, variante A).
 
 **Agents hors pipeline `full` (invocation manuelle)** : `ux`, `ui`, `devops`, `sre`, `release`, `techwriter`, `privacy` — même injection de contexte que les autres agents quand `--project` est utilisé.
 
@@ -33,7 +33,8 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
 | `ux`       | `ux-designer`                              |
 | `dev`      | `fullstack-dev`                            |
 | `qa`       | `qa-engineer`                              |
-| `redteam`  | `red-team`                                 |
+| `redteam_reflection` | `red-team-reflection`               |
+| `security` | `red-team`                                 |
 | `devops`   | `devops-platform`                          |
 | `sre`      | `sre-observability`                        |
 | `release`  | `release-manager`                          |
@@ -54,7 +55,7 @@ npm run verify:prompts  # Vérifie que tous les `src/prompts/*.md` référencés
 
 npm run start        # Aide interactive + liste des rôles (--role)
 
-# Pipeline (inchangé) : PM → Architect → Dev ⇄ QA ⇄ Red Team
+# Pipeline : PM → Architect → Red Team Réflexion → Dev ⇄ Sécurité ⇄ QA
 npm run pipeline     # équivalent à --pipeline full
 npm run pipeline:next # prochaine issue du backlog.json
 
@@ -67,7 +68,8 @@ npm run agent:architect
 npm run agent:ux
 npm run agent:dev
 npm run agent:qa
-npm run agent:redteam
+npm run agent:redteam_reflection
+npm run agent:security
 npm run agent:devops
 npm run agent:sre
 npm run agent:release
@@ -82,7 +84,7 @@ npm run agent:privacy
 |--------|------|
 | `--project <fichier>` | Charge `projects/…`. Fichier `last-run/<slug>/` pour les sorties et le backlog dédié. |
 | `--brief-file <fichier>` | Brief ou tâche lus depuis un fichier (chemins relatifs au cwd ou absolus). Utile avec `last-run/<slug>/pm.md`. |
-| `--resume-from <étape>` | Reprend le pipeline : `pm` \| `architect` \| `dev` \| `qa` \| `redteam`. Le brief fourni remplace le contexte des étapes ignorées. |
+| `--resume-from <étape>` | Reprend le pipeline : `pm` \| `architect` \| `redteam_reflection` \| `dev` \| `security` \| `qa`. Le brief fourni remplace le contexte des étapes ignorées. |
 | `--sync-issues` | Crée les issues GitHub manquantes depuis `backlog.json`. Exige `--project` avec `repo:` dans le frontmatter et `GITHUB_TOKEN` dans `.env`. |
 
 Exemples :
@@ -144,7 +146,7 @@ ce qui rend les agents génériques et adaptables à n'importe quelle stack.
 
 ## Chaîne assurance (rappel)
 
-Le `fullPipeline` ne couvre pas CI/CD, Docker ni la config d’observabilité produite par `devops` / `sre`. Avant merge sur le dépôt cible : revue humaine ciblée et/ou Red Team sur le diff infra, protections de branches, checklist workflows et conteneurs — voir [README.md](README.md) (section « Chaîne assurance »).
+Le `fullPipeline` ne couvre pas CI/CD, Docker ni la config d’observabilité produite par `devops` / `sre`. Avant merge sur le dépôt cible : revue humaine ciblée et/ou audit sécurité ciblé sur le diff infra, protections de branches, checklist workflows et conteneurs — voir [README.md](README.md) (section « Chaîne assurance »).
 
 *Roadmap non implémentée : un `--pipeline extended` pourrait un jour enrichir le flux sans modifier le comportement par défaut du `full`.*
 
@@ -158,7 +160,7 @@ Le `fullPipeline` ne couvre pas CI/CD, Docker ni la config d’observabilité pr
 - Les types et schémas partagés du domaine (backlog, pipeline runs, projet) vivent dans **`src/models.ts`** — évite de dupliquer ces définitions ailleurs.
 - Teste toujours avec `npx tsc --noEmit` avant de proposer un changement TS.
 - **Nouvel agent** : créer `src/prompts/<base>.md`, ajouter une entrée dans **`AGENT_DEFINITIONS`** (`src/agent-config.ts`) avec la même base de nom pour la clé rôle et `promptFile`, et une clé `MODEL_<ROLE>` dans `perRoleEnvKey` si besoin d’override env. La CI vérifie les fichiers avec `npm run verify:prompts`.
-- Ne touche PAS à la logique des pipelines (PM → Architect → Dev ⇄ QA ⇄ RedTeam).
+- Ne touche PAS à la logique des pipelines (PM → Architect → Red Team Réflexion → Dev ⇄ Sécurité ⇄ QA).
   Les feedback loops sont critiques pour la qualité.
 - Avec `--project`, les sorties sont écrites dans `last-run/<slug>/<role>.md` (un fichier par rôle ; deux runs parallèles sur le même rôle s’écrasent — usage prévu mono-session).
-- Les sorties **DevOps / SRE** (et tout diff CI/CD, Docker, observabilité) produites hors `fullPipeline` exigent une **révision assurance** humaine ou un passage Red Team ciblé avant merge sur le dépôt cible — section « Chaîne assurance » ci-dessus et détail dans le README.
+- Les sorties **DevOps / SRE** (et tout diff CI/CD, Docker, observabilité) produites hors `fullPipeline` exigent une **révision assurance** humaine ou un passage sécurité ciblé avant merge sur le dépôt cible — section « Chaîne assurance » ci-dessus et détail dans le README.

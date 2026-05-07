@@ -3,7 +3,7 @@
  * AI Team Orchestrator — Cerveau de l'équipe de dev IA
  * ============================================================
  *
- * Ce script orchestre les agents du pipeline (PM, architecte, dev, QA, red team)
+ * Ce script orchestre les agents du pipeline (PM, architecte, red team réflexion, dev, sécurité, QA)
  * et des rôles additionnels à la demande (voir AGENT_CONFIG).
  * via le Cursor SDK. Chaque agent est un subagent avec son propre prompt système
  * et potentiellement son propre modèle.
@@ -532,14 +532,11 @@ async function pipelineNext() {
 // ------------------------------------------------------------
 
 /**
- * Pipeline complet : PM → Architect → Dev ⇄ QA (loop) ⇄ RedTeam (loop)
+ * Pipeline full en 2 macro-parties :
+ * 1) Réflexion -> Backlog : PM -> Architect -> Red Team Réflexion
+ * 2) Exécution backlog -> QA : Dev -> Sécurité -> QA
  *
- * Workflow avec boucles feedback :
- * 1. QA approuve (APPROVE) → continue vers RedTeam
- *    QA demande changements → relance Dev, puis re-review par QA (max 3 itérations)
- * 2. RedTeam approuve → pipeline complet
- *    Vulnérabilités critiques → relance Dev, puis re-audit par RedTeam (max 3 itérations)
- *    Vulnérabilités moyennes → passage avec documentation pour sprints futurs
+ * Variante A imposée : sécurité avant QA.
  *
  * @param brief - Brief de départ (ou sortie d'étapes précédentes si resumeFrom est utilisé)
  * @param opts.resumeFrom - Reprendre depuis cette étape (les étapes antérieures sont ignorées)
@@ -549,7 +546,7 @@ async function fullPipeline(
   brief: string,
   opts: { resumeFrom?: PipelineStep; pipelineRunId?: string; issueSize?: IssueSize } = {}
 ) {
-  // Routing par taille : S → dev direct, M → skip PM, L/XL → pipeline complet
+  // Routing par taille : S → dev direct, M → architect, L/XL → réflexion complète
   // Un --resume-from explicite prend toujours le dessus.
   const sizeBasedStart: Record<IssueSize, PipelineStep> = {
     S: "dev",
@@ -573,9 +570,9 @@ async function fullPipeline(
   }
 
   let qaIteration = 0;
-  let rtIteration = 0;
+  let securityIteration = 0;
   let qaEscalated = false;
-  let rtEscalated = false;
+  let securityEscalated = false;
   let mediumSecurityNotes = false;
   let runStatus: PipelineRunStatus = "success";
 
@@ -586,7 +583,7 @@ async function fullPipeline(
 
   try {
     console.log("═".repeat(60));
-    console.log("🏗️  PIPELINE COMPLET — Du brief au déploiement (avec feedback loop)");
+    console.log("🏗️  PIPELINE FULL — Réflexion -> Backlog -> Exécution -> QA");
     if (pipelineIssueSize) {
       console.log(`   📐 Taille issue (grille modèles) : ${pipelineIssueSize}`);
     }
@@ -599,97 +596,161 @@ async function fullPipeline(
     }
     console.log("═".repeat(60));
 
-  // Quand on reprend depuis une étape intermédiaire, le brief joue le rôle
-  // du contexte accumulé des étapes précédentes.
-  let specs = brief;
-  let architecture = "";
+    // Quand on reprend depuis une étape intermédiaire, le brief joue le rôle
+    // du contexte accumulé des étapes précédentes.
+    let specs = brief;
+    let architectureVision = "";
+    let reflectionChallenge = "";
 
-  // ── Étape 1 : Product Manager ──
-  if (startIdx === 0) {
-    console.log("\n📋 ÉTAPE 1/5 — Product Manager");
-    const pmOutput = await runAgent("pm", brief, { frugal, issueSize: pipelineIssueSize });
-    if (pmOutput.trim()) {
-      specs = pmOutput;
+    // ── Étape 1 : Product Manager (Réflexion) ──
+    if (startIdx <= 0) {
+      console.log("\n📋 ÉTAPE 1/6 — Product Manager (Réflexion -> Backlog)");
+      const pmOutput = await runAgent(
+        "pm",
+        "Formalise le backlog (Must/Should/Could/Wont) en distinguant explicitement la provenance top_down ou bottom_up de chaque item.",
+        { additionalContext: brief, frugal, issueSize: pipelineIssueSize }
+      );
+      if (pmOutput.trim()) {
+        specs = pmOutput;
+      }
     } else {
-      console.log("   ℹ️  L'agent PM n'a pas jugé utile d'ajouter quoi que ce soit et a rendu la main sans ajout. Brief d'origine conservé.");
-      // specs reste = brief
+      console.log("\n📋 ÉTAPE 1/6 — Product Manager : ⏭  ignoré (--resume-from)");
     }
-    console.log("⏸️  CHECKPOINT : Review les specs ci-dessus.");
-    console.log("   En production, le pipeline s'arrête ici pour ta validation.\n");
-  } else {
-    console.log("\n📋 ÉTAPE 1/5 — Product Manager : ⏭  ignoré (--resume-from)");
-  }
 
-  // ── Étape 2 : Data Architect ──
-  if (startIdx <= 1) {
-    console.log("\n🏛️  ÉTAPE 2/5 — Data Architect");
-    const architectOutput = await runAgent(
-      "architect",
-      "Conçois l'architecture technique et le modèle de données pour les specs suivantes.",
-      { additionalContext: specs, frugal, issueSize: pipelineIssueSize }
-    );
-    if (architectOutput.trim()) {
-      architecture = architectOutput;
+    // ── Étape 2 : Architect (cadrage architecture amont) ──
+    if (startIdx <= 1) {
+      console.log("\n🏛️  ÉTAPE 2/6 — Data Architect (Vision architecture)");
+      architectureVision = await runAgent(
+        "architect",
+        "Établis la vision architecture cible, les contraintes, une alternative crédible et les risques principaux pour les items Must/Should.",
+        { additionalContext: specs, frugal, issueSize: pipelineIssueSize }
+      );
     } else {
-      console.log("   ℹ️  L'agent Architect n'a pas jugé utile d'ajouter quoi que ce soit et a rendu la main sans ajout.");
-      // architecture reste = ""
+      console.log("\n🏛️  ÉTAPE 2/6 — Data Architect : ⏭  ignoré (--resume-from)");
     }
-    console.log("⏸️  CHECKPOINT : Review l'architecture ci-dessus.\n");
-  } else {
-    console.log("\n🏛️  ÉTAPE 2/5 — Data Architect : ⏭  ignoré (--resume-from)");
-  }
 
-  // ── Étape 3 & 4 : Dev ⇄ QA Loop ──
-  // Option C : le brief d'origine est toujours présent pour le Dev,
-  // même si PM/Architect ont enrichi le contexte.
-  const devContext = [
-    `## Brief d'origine\n${brief}`,
-    specs !== brief ? `## Specs PM\n${specs}` : null,
-    architecture ? `## Architecture\n${architecture}` : null,
-  ].filter(Boolean).join("\n\n");
+    // ── Étape 3 : Red Team Réflexion (challenge produit + architecture) ──
+    if (startIdx <= 2) {
+      console.log("\n🧠 ÉTAPE 3/6 — Red Team Réflexion");
+      reflectionChallenge = await runAgent(
+        "redteam_reflection",
+        "Challenge la cohérence produit/architecture, explicite les hypothèses à risque et propose des alternatives actionnables pour backlog Must/Should.",
+        {
+          additionalContext: `## Specs backlog\n${specs}\n\n## Vision architecture\n${architectureVision}`,
+          frugal,
+          issueSize: pipelineIssueSize,
+        }
+      );
+    } else {
+      console.log("\n🧠 ÉTAPE 3/6 — Red Team Réflexion : ⏭  ignoré (--resume-from)");
+    }
 
-  if (startIdx <= 2) {
-    console.log("\n💻 ÉTAPE 3/5 — Développeur Full-Stack");
-    frugal = frugal || await checkFrugalMode(process.env);
-    if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
-  }
-  let implementation = startIdx <= 2
-    ? await runAgent(
-        "dev",
-        "Implémente les fonctionnalités selon les specs et l'architecture ci-dessous. Crée une branche feature/ et ouvre une PR.",
-        { additionalContext: devContext, cloud: true, autoCreatePR: true, frugal, issueSize: pipelineIssueSize }
-      )
-    : brief; // si on reprend depuis QA ou redteam, le brief est le contexte de l'implémentation
+    // ── Exécution : Dev -> Sécurité -> QA ──
+    const devContext = [
+      `## Brief d'origine\n${brief}`,
+      specs !== brief ? `## Backlog formalisé\n${specs}` : null,
+      architectureVision ? `## Vision architecture\n${architectureVision}` : null,
+      reflectionChallenge ? `## Challenge produit/architecture\n${reflectionChallenge}` : null,
+    ].filter(Boolean).join("\n\n");
 
-  // Boucle QA avec feedback
-  let qaApproved = startIdx > 3; // si on reprend depuis redteam, QA est déjà passé
-  const maxQAIterations = 3;
-  let qaReport = "";
+    if (startIdx <= 3) {
+      console.log("\n💻 ÉTAPE 4/6 — Développeur Full-Stack");
+      frugal = frugal || await checkFrugalMode(process.env);
+      if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
+    }
 
-  if (startIdx > 3) {
-    console.log("\n🧪 ÉTAPE 4/5 — QA Engineer : ⏭  ignoré (--resume-from)");
-  } else {
+    let implementation = startIdx <= 3
+      ? await runAgent(
+          "dev",
+          "Implémente les fonctionnalités du backlog Must/Should en respectant la vision architecture et ouvre/met à jour la PR.",
+          { additionalContext: devContext, cloud: true, autoCreatePR: true, frugal, issueSize: pipelineIssueSize }
+        )
+      : brief;
+
+    // ── Étape 5 : Sécurité avec boucle feedback ──
+    let securityApproved = startIdx > 4;
+    const maxSecurityIterations = 3;
+    let securityReport = "";
+
+    if (startIdx > 4) {
+      console.log("\n🔐 ÉTAPE 5/6 — Sécurité : ⏭  ignoré (--resume-from)");
+    } else {
+      while (!securityApproved && securityIteration < maxSecurityIterations) {
+        securityIteration++;
+        console.log(`\n🔐 ÉTAPE 5/6 — Sécurité — itération ${securityIteration}/${maxSecurityIterations}`);
+        frugal = frugal || await checkFrugalMode(process.env);
+        if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
+
+        const securityPrompt = securityIteration === 1
+          ? "Audite la PR pour les vulnérabilités de sécurité."
+          : `Re-audite après corrections.\n\nRapport précédent sécurité :\n${securityReport}`;
+
+        securityReport = await runAgent(
+          "security",
+          securityPrompt,
+          {
+            additionalContext: implementation,
+            cloud: true,
+            frugal,
+            issueSize: pipelineIssueSize,
+          }
+        );
+
+        const securityVerdict = detectSecurityVerdict(securityReport);
+        if (securityVerdict === "APPROVED") {
+          securityApproved = true;
+          console.log("✅ Sécurité approuvée — passage à QA.\n");
+        } else if (securityVerdict === "CRITICAL_ISSUES" && securityIteration < maxSecurityIterations) {
+          console.log("🔄 Vulnérabilités critiques — relance du développeur.\n");
+          implementation = await runAgent(
+            "dev",
+            `Corrige les vulnérabilités critiques signalées par la sécurité.\n\n${securityReport}`,
+            {
+              additionalContext: devContext,
+              cloud: true,
+              autoCreatePR: false,
+              frugal,
+              issueSize: pipelineIssueSize,
+            }
+          );
+        } else if (securityVerdict === "MEDIUM_ISSUES") {
+          mediumSecurityNotes = true;
+          securityApproved = true;
+          console.log("⚠️  Vulnérabilités moyennes — passage avec documentation.\n");
+        } else {
+          securityEscalated = true;
+          securityApproved = true;
+          console.log("⚠️  Sécurité non approuvée après 3 itérations — escalade manuelle recommandée.\n");
+        }
+      }
+    }
+
+    // ── Étape 6 : QA avec feedback + re-challenge sécurité en cas de retouche Dev ──
+    let qaApproved = false;
+    const maxQAIterations = 3;
+    let qaReport = "";
+
     while (!qaApproved && qaIteration < maxQAIterations) {
       qaIteration++;
-      console.log(`\n🧪 ÉTAPE 4/5 — QA Engineer — itération ${qaIteration}/${maxQAIterations}`);
+      console.log(`\n🧪 ÉTAPE 6/6 — QA Engineer — itération ${qaIteration}/${maxQAIterations}`);
       frugal = frugal || await checkFrugalMode(process.env);
       if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
 
       const qaPrompt = qaIteration === 1
-        ? "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité aux specs."
+        ? "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité au backlog."
         : `Re-review la PR après les changements du développeur.\n\nVoici le rapport précédent de QA :\n${qaReport}\n\nVérifie si les problèmes identifiés ont été correctement adressés.`;
-
-      // Quand on reprend depuis QA (startIdx >= 3), specs === brief === implementation.
-      // Passer les deux créerait une duplication — on passe uniquement le brief.
-      const qaAdditionalContext = startIdx >= 3
-        ? `## Contexte d'implémentation\n${brief}`
-        : `## Specs PM\n${specs}\n\n## Implémentation\n${implementation}`;
 
       qaReport = await runAgent(
         "qa",
         qaPrompt,
         {
-          additionalContext: qaAdditionalContext,
+          additionalContext: [
+            `## Backlog formalisé\n${specs}`,
+            architectureVision ? `## Vision architecture\n${architectureVision}` : null,
+            reflectionChallenge ? `## Challenge amont\n${reflectionChallenge}` : null,
+            securityReport ? `## Rapport sécurité\n${securityReport}` : null,
+            `## Implémentation\n${implementation}`,
+          ].filter(Boolean).join("\n\n"),
           cloud: true,
           frugal,
           issueSize: pipelineIssueSize,
@@ -697,71 +758,23 @@ async function fullPipeline(
       );
 
       const verdict = detectQAVerdict(qaReport);
-
       if (verdict === "APPROVE") {
         qaApproved = true;
-        console.log("✅ QA APPROUVE — Passage à l'audit de sécurité.\n");
-      } else if (qaIteration < maxQAIterations) {
-        console.log("🔄 QA DEMANDE DES CHANGEMENTS — Relance du développeur.\n");
-        frugal = frugal || await checkFrugalMode(process.env);
-        if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
+        console.log("✅ QA approuve — pipeline complet.\n");
+        continue;
+      }
 
-        implementation = await runAgent(
-          "dev",
-          `Corrige les problèmes soulevés par QA dans la revue précédente :\n\n${qaReport}\n\nMet à jour la PR avec les changements.`,
-          {
-            additionalContext: devContext,
-            cloud: true,
-            autoCreatePR: false,
-            frugal,
-            issueSize: pipelineIssueSize,
-          }
-        );
-      } else {
-        console.log("⚠️  QA N'A PAS APPROUVÉ APRÈS 3 ITÉRATIONS — Passage malgré tout (escalade manuelle recommandée).\n");
+      if (qaIteration >= maxQAIterations) {
         qaEscalated = true;
         qaApproved = true;
+        console.log("⚠️  QA non approuvée après 3 itérations — escalade manuelle recommandée.\n");
+        continue;
       }
-    }
-  }
 
-  // ── Étape 5 : Red Team avec boucle feedback ──
-  let securityApproved = false;
-  const maxRTIterations = 3;
-  let securityReport = "";
-
-  while (!securityApproved && rtIteration < maxRTIterations) {
-    rtIteration++;
-    console.log(`\n🔴 ÉTAPE 5/5 — Red Team — itération ${rtIteration}/${maxRTIterations}`);
-    frugal = frugal || await checkFrugalMode(process.env);
-    if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
-
-    const rtPrompt = rtIteration === 1
-      ? "Audite le code de la PR pour les vulnérabilités de sécurité."
-      : `Re-audite la PR après les corrections du développeur.\n\nVoici le rapport précédent de la red team :\n${securityReport}\n\nVérifie si les problèmes identifiés ont été correctement adressés.`;
-
-    securityReport = await runAgent(
-      "redteam",
-      rtPrompt,
-      {
-        additionalContext: implementation,
-        cloud: true,
-        frugal,
-        issueSize: pipelineIssueSize,
-      }
-    );
-
-    const securityVerdict = detectSecurityVerdict(securityReport);
-
-    if (securityVerdict === "APPROVED") {
-      securityApproved = true;
-      console.log("✅ AUDIT SÉCURITÉ APPROUVÉ — Pipeline complet.\n");
-    } else if (securityVerdict === "CRITICAL_ISSUES" && rtIteration < maxRTIterations) {
-      console.log("🔄 VULNÉRABILITÉS CRITIQUES — Relance du développeur.\n");
-
+      console.log("🔄 QA demande des changements — relance développeur puis re-challenge sécurité.\n");
       implementation = await runAgent(
         "dev",
-        `Corrige les vulnérabilités critiques de sécurité soulevées par la red team :\n\n${securityReport}\n\nMets à jour la PR avec les corrections.`,
+        `Corrige les problèmes soulevés par QA dans la revue précédente :\n\n${qaReport}\n\nMet à jour la PR avec les changements.`,
         {
           additionalContext: devContext,
           cloud: true,
@@ -770,33 +783,53 @@ async function fullPipeline(
           issueSize: pipelineIssueSize,
         }
       );
-    } else if (securityVerdict === "MEDIUM_ISSUES") {
-      mediumSecurityNotes = true;
-      securityApproved = true;
-      console.log("⚠️  VULNÉRABILITÉS MOYENNES IDENTIFIÉES — Passage avec documentation.\n");
-      console.log("   Note : Les vulnérabilités moyennes doivent être traitées dans les sprints suivants.\n");
-    } else {
-      console.log("⚠️  AUDIT DE SÉCURITÉ N'A PAS APPROUVÉ APRÈS 3 ITÉRATIONS — Passage malgré tout (escalade manuelle recommandée).\n");
-      rtEscalated = true;
-      securityApproved = true;
+
+      // Variante A imposée: toute retouche post-sécurité est re-vérifiée avant la QA suivante.
+      const securityAfterQaFix = await runAgent(
+        "security",
+        "Re-vérifie rapidement les impacts sécurité après corrections demandées par QA.",
+        {
+          additionalContext: implementation,
+          cloud: true,
+          frugal,
+          issueSize: pipelineIssueSize,
+        }
+      );
+      securityReport = securityAfterQaFix;
+      const securityVerdict = detectSecurityVerdict(securityAfterQaFix);
+      if (securityVerdict === "CRITICAL_ISSUES") {
+        implementation = await runAgent(
+          "dev",
+          `Corrige les vulnérabilités critiques apparues après corrections QA :\n\n${securityAfterQaFix}`,
+          {
+            additionalContext: devContext,
+            cloud: true,
+            autoCreatePR: false,
+            frugal,
+            issueSize: pipelineIssueSize,
+          }
+        );
+      } else if (securityVerdict === "MEDIUM_ISSUES") {
+        mediumSecurityNotes = true;
+      }
     }
-  }
 
-  // ── Résumé final ──
-  const skipped = (step: PipelineStep) => PIPELINE_STEPS.indexOf(step) < startIdx;
-  if (qaEscalated || rtEscalated || mediumSecurityNotes) {
-    runStatus = "partial";
-  }
+    // ── Résumé final ──
+    const skipped = (step: PipelineStep) => PIPELINE_STEPS.indexOf(step) < startIdx;
+    if (qaEscalated || securityEscalated || mediumSecurityNotes) {
+      runStatus = "partial";
+    }
 
-  console.log("\n" + "═".repeat(60));
-  console.log("📊 PIPELINE TERMINÉ — Résumé");
-  console.log("═".repeat(60));
-  console.log(`1. Specs PM          : ${skipped("pm") ? "⏭  ignoré" : "✅ rédigées"}`);
-  console.log(`2. Architecture      : ${skipped("architect") ? "⏭  ignoré" : "✅ conçue"}`);
-  console.log(`3. Implémentation    : ${skipped("dev") ? "⏭  ignoré" : "✅ PR créée"}`);
-  console.log(`4. Review QA         : ${skipped("qa") ? "⏭  ignoré" : `✅ approuvée (${qaIteration} itération${qaIteration > 1 ? "s" : ""})`}`);
-  console.log(`5. Audit sécurité    : ✅ complété (${rtIteration} itération${rtIteration > 1 ? "s" : ""})`);
-  console.log("\n👉 Va sur GitHub pour review final et merger la PR.");
+    console.log("\n" + "═".repeat(60));
+    console.log("📊 PIPELINE TERMINÉ — Résumé");
+    console.log("═".repeat(60));
+    console.log(`1. Backlog PM                : ${skipped("pm") ? "⏭  ignoré" : "✅ formalisé"}`);
+    console.log(`2. Vision architecture       : ${skipped("architect") ? "⏭  ignoré" : "✅ cadrée"}`);
+    console.log(`3. Red Team réflexion        : ${skipped("redteam_reflection") ? "⏭  ignoré" : "✅ challenge produit/archi"}`);
+    console.log(`4. Implémentation            : ${skipped("dev") ? "⏭  ignoré" : "✅ PR mise à jour"}`);
+    console.log(`5. Sécurité                  : ${skipped("security") ? "⏭  ignoré" : `✅ complétée (${securityIteration} itération${securityIteration > 1 ? "s" : ""})`}`);
+    console.log(`6. Review QA                 : ${skipped("qa") ? "⏭  ignoré" : `✅ approuvée (${qaIteration} itération${qaIteration > 1 ? "s" : ""})`}`);
+    console.log("\n👉 Va sur GitHub pour review final et merger la PR.");
   } catch (e) {
     runStatus = "failed";
     throw e;
@@ -807,7 +840,7 @@ async function fullPipeline(
         brief: briefForRecord,
         resumeFrom: resumeFrom === "pm" ? null : resumeFrom,
         qaIterations: qaIteration,
-        securityIterations: rtIteration,
+        securityIterations: securityIteration,
         status: runStatus,
         startedAt,
         finishedAt: new Date().toISOString(),
@@ -954,10 +987,11 @@ Usage :
   npm run agent:architect "Conçois le modèle de données pour X"
   npm run agent:dev "Implémente la page d'upload de dataset"
   npm run agent:qa "Review la PR #42"
-  npm run agent:redteam "Audite la sécurité de l'app"
+  npm run agent:security "Audite la sécurité de l'app"
+  npm run agent:redteam_reflection "Challenge produit/architecture"
 
   npm run pipeline "Brief complet du projet"
-    → Lance le pipeline complet : PM → Archi → Dev → QA → Red Team
+    → Lance le pipeline complet : PM → Archi → Red Team Réflexion → Dev → Sécurité → QA
 
   npm run pm:backlog
     → PM analyse le repo et génère backlog.json avec issues prioritaires
@@ -987,7 +1021,7 @@ Options globales :
 
   --resume-from <step>
     → Reprend le pipeline à une étape donnée en ignorant les étapes précédentes
-    → Étapes : pm | architect | dev | qa | redteam
+    → Étapes : pm | architect | redteam_reflection | dev | security | qa
     → Le brief fourni joue le rôle du contexte accumulé des étapes ignorées
     → Exemple : après un --role pm, passer last-run/pm.md à --pipeline avec --resume-from architect
 

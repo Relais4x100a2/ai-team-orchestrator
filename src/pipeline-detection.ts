@@ -1,5 +1,5 @@
 /**
- * Heuristiques minimales pour interpréter les rapports QA / Red Team dans le pipeline.
+ * Heuristiques minimales pour interpréter les rapports QA / Sécurité dans le pipeline.
  *
  * Détection QA (bilingue) : ligne explicite `VERDICT: …`, bloc « ### … Verdict »,
  * puis motifs EN/FR dans le corps (hors blocs ```) — évite les faux positifs sur
@@ -128,7 +128,7 @@ export function detectQAVerdict(qaReport: string): QAVerdict {
   return "APPROVE";
 }
 
-/** Déduit le niveau d’alerte sécurité à partir du texte du rapport Red Team. */
+/** Déduit le niveau d’alerte sécurité à partir du texte du rapport Sécurité. */
 export function detectSecurityVerdict(securityReport: string): SecurityVerdict {
   const lowerReport = securityReport.toLowerCase();
   if (

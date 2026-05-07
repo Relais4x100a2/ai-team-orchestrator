@@ -10,8 +10,15 @@ import { isAbsolute, normalize, resolve } from "path";
 export type IssueStatus = "todo" | "in_progress" | "done" | "skipped";
 export type IssuePriority = "MUST" | "SHOULD" | "COULD" | "WONT";
 export type IssueSize = "S" | "M" | "L" | "XL";
+export type IssueSource = "top_down" | "bottom_up";
 
-export type PipelineStep = "pm" | "architect" | "dev" | "qa" | "redteam";
+export type PipelineStep =
+  | "pm"
+  | "architect"
+  | "redteam_reflection"
+  | "dev"
+  | "security"
+  | "qa";
 
 export type PipelineRunStatus = "success" | "partial" | "failed";
 
@@ -19,9 +26,10 @@ export type PipelineRunStatus = "success" | "partial" | "failed";
 export const PIPELINE_STEPS: readonly PipelineStep[] = [
   "pm",
   "architect",
+  "redteam_reflection",
   "dev",
+  "security",
   "qa",
-  "redteam",
 ] as const;
 
 // --- Entités --------------------------------------------------------------
@@ -38,6 +46,11 @@ export interface BacklogIssue {
   completedAt: string | null;
   pipelineRun: string | null;
   githubIssueNumber?: number;
+  source?: IssueSource;
+  architectureVision?: string;
+  architectureAlternative?: string;
+  architectureRisks?: string;
+  reflectionChallenge?: string;
 }
 
 export interface Backlog {
@@ -74,6 +87,7 @@ export interface PipelineRunsFile {
 const ISSUE_STATUSES: IssueStatus[] = ["todo", "in_progress", "done", "skipped"];
 const ISSUE_PRIORITIES: IssuePriority[] = ["MUST", "SHOULD", "COULD", "WONT"];
 const ISSUE_SIZES: IssueSize[] = ["S", "M", "L", "XL"];
+const ISSUE_SOURCES: IssueSource[] = ["top_down", "bottom_up"];
 const PIPELINE_RUN_STATUSES: PipelineRunStatus[] = ["success", "partial", "failed"];
 
 const ISO_MS =
@@ -147,6 +161,44 @@ function validateBacklogIssue(raw: unknown, index: number): BacklogIssue {
     throw new Error(`issues[${index}].pipelineRun : null ou chaîne non vide obligatoire`);
   }
 
+  let source: IssueSource | undefined;
+  if (o.source !== undefined) {
+    source = expectEnum(o.source, ISSUE_SOURCES, `issues[${index}].source`);
+  }
+
+  const architectureVision =
+    o.architectureVision === undefined
+      ? undefined
+      : typeof o.architectureVision === "string"
+        ? o.architectureVision
+        : (() => {
+            throw new Error(`issues[${index}].architectureVision : chaîne attendue`);
+          })();
+  const architectureAlternative =
+    o.architectureAlternative === undefined
+      ? undefined
+      : typeof o.architectureAlternative === "string"
+        ? o.architectureAlternative
+        : (() => {
+            throw new Error(`issues[${index}].architectureAlternative : chaîne attendue`);
+          })();
+  const architectureRisks =
+    o.architectureRisks === undefined
+      ? undefined
+      : typeof o.architectureRisks === "string"
+        ? o.architectureRisks
+        : (() => {
+            throw new Error(`issues[${index}].architectureRisks : chaîne attendue`);
+          })();
+  const reflectionChallenge =
+    o.reflectionChallenge === undefined
+      ? undefined
+      : typeof o.reflectionChallenge === "string"
+        ? o.reflectionChallenge
+        : (() => {
+            throw new Error(`issues[${index}].reflectionChallenge : chaîne attendue`);
+          })();
+
   return {
     id: id.trim(),
     title: title.trim(),
@@ -158,6 +210,11 @@ function validateBacklogIssue(raw: unknown, index: number): BacklogIssue {
     updatedAt,
     completedAt,
     pipelineRun,
+    source,
+    architectureVision,
+    architectureAlternative,
+    architectureRisks,
+    reflectionChallenge,
   };
 }
 

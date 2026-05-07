@@ -43,8 +43,7 @@ function resolveModel(
 // Stratégie coût/qualité :
 //   - Pipeline (agents en boucle possible) : sonnet-4-6 ou composer-2 selon le besoin
 //   - Agents hors-pipeline : composer-2 par défaut (invocations manuelles ponctuelles)
-//   - Thinking activé là où le raisonnement profond est nécessaire (architect ;
-//     redteam sur composer-2 avec thinking si le backend le prend en charge)
+//   - Thinking activé là où le raisonnement profond est nécessaire (architect)
 // ---------------------------------------------------------------------------
 
 const AGENT_DEFINITIONS = {
@@ -77,6 +76,19 @@ const AGENT_DEFINITIONS = {
       ],
     } satisfies ModelSelection,
   },
+  redteam_reflection: {
+    promptFile: "red-team-reflection",
+    description: "Red Team Réflexion — challenge produit & architecture",
+    tier: "strong" as const,
+    defaultModel: {
+      id: "claude-sonnet-4-5",
+      params: [
+        { id: "thinking", value: "true" },
+        { id: "context", value: "200k" },
+        { id: "effort", value: "medium" },
+      ],
+    } satisfies ModelSelection,
+  },
   dev: {
     promptFile: "fullstack-dev",
     description: "Développeur Full-Stack — implémentation",
@@ -97,9 +109,9 @@ const AGENT_DEFINITIONS = {
       params: [{ id: "fast", value: "true" }],
     } satisfies ModelSelection,
   },
-  redteam: {
+  security: {
     promptFile: "red-team",
-    description: "Red Team — audit de sécurité",
+    description: "Sécurité — audit de sécurité",
     tier: "strong" as const,
     // composer-2 : uniquement le param `fast` est une variante connue côté API Agents
     // (`thinking` sur composer-2 provoque invalid_model).
@@ -168,10 +180,11 @@ export type AgentRole = keyof typeof AGENT_DEFINITIONS;
 const PER_ROLE_ENV_KEY: Record<AgentRole, string> = {
   pm: "MODEL_PM",
   architect: "MODEL_ARCHITECT",
+  redteam_reflection: "MODEL_REDTEAM_REFLECTION",
   ux: "MODEL_UX",
   dev: "MODEL_DEV",
   qa: "MODEL_QA",
-  redteam: "MODEL_REDTEAM",
+  security: "MODEL_SECURITY",
   devops: "MODEL_DEVOPS",
   sre: "MODEL_SRE",
   release: "MODEL_RELEASE",
@@ -181,7 +194,14 @@ const PER_ROLE_ENV_KEY: Record<AgentRole, string> = {
 };
 
 /** Rôles du pipeline `full` pour lesquels la grille S/M/L/XL s'applique. */
-const PIPELINE_ROLE_WITH_SIZE_GRID = new Set<AgentRole>(["pm", "architect", "dev", "qa", "redteam"]);
+const PIPELINE_ROLE_WITH_SIZE_GRID = new Set<AgentRole>([
+  "pm",
+  "architect",
+  "redteam_reflection",
+  "dev",
+  "security",
+  "qa",
+]);
 
 const COMPOSER_FAST: ModelSelection = {
   id: "composer-2",
@@ -240,11 +260,13 @@ function modelForRoleAndIssueSize(role: AgentRole, size: IssueSize): ModelSelect
       if (size === "S") return COMPOSER_FAST;
       if (size === "XL") return ARCHITECT_OPUS;
       return AGENT_DEFINITIONS.architect.defaultModel as ModelSelection;
+    case "redteam_reflection":
+      return size === "XL" ? REDTEAM_SONNET : AGENT_DEFINITIONS.redteam_reflection.defaultModel as ModelSelection;
     case "dev":
       return size === "XL" ? COMPOSER_SLOW : COMPOSER_FAST;
     case "qa":
       return size === "XL" ? COMPOSER_SLOW : COMPOSER_FAST;
-    case "redteam":
+    case "security":
       return size === "XL" ? REDTEAM_SONNET : COMPOSER_SLOW;
     default:
       return AGENT_DEFINITIONS[role].defaultModel as ModelSelection;
@@ -319,5 +341,5 @@ export function formatModelSelection(m: ModelSelection): string {
   return `${m.id} (${p})`;
 }
 
-export const PIPELINE_STEPS = ["pm", "architect", "dev", "qa", "redteam"] as const;
+export const PIPELINE_STEPS = ["pm", "architect", "redteam_reflection", "dev", "security", "qa"] as const;
 export type PipelineStep = (typeof PIPELINE_STEPS)[number];

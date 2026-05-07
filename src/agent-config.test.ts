@@ -31,8 +31,8 @@ describe("createAgentConfig", () => {
     assert.strictEqual(cfg.pm.model.id, "claude-sonnet-4-5");
     assert.ok(Array.isArray(cfg.pm.model.params) && cfg.pm.model.params!.length > 0);
     assert.strictEqual(cfg.dev.model.id, "composer-2");
-    assert.strictEqual(cfg.redteam.model.id, "composer-2");
-    assert.ok(cfg.redteam.model.params?.some(p => p.id === "fast" && p.value === "false"));
+    assert.strictEqual(cfg.security.model.id, "composer-2");
+    assert.ok(cfg.security.model.params?.some(p => p.id === "fast" && p.value === "false"));
   });
 
   it("MODEL_<ROLE> surcharge le modèle d'un rôle précis (sans params)", () => {
@@ -47,7 +47,7 @@ describe("createAgentConfig", () => {
     const cfg = createAgentConfig({ MODEL_STRONG: "gpt-5.5" });
     assert.strictEqual(cfg.pm.model.id, "gpt-5.5");
     assert.strictEqual(cfg.architect.model.id, "gpt-5.5");
-    assert.strictEqual(cfg.redteam.model.id, "gpt-5.5");
+    assert.strictEqual(cfg.security.model.id, "gpt-5.5");
     assert.strictEqual(cfg.dev.model.id, "composer-2");
   });
 
@@ -73,7 +73,8 @@ describe("createAgentConfig", () => {
   it("expose toujours tous les champs promptFile / description par rôle", () => {
     const cfg = createAgentConfig({});
     assert.strictEqual(cfg.pm.promptFile, "product-manager");
-    assert.ok(cfg.redteam.description.length > 0);
+    assert.ok(cfg.security.description.length > 0);
+    assert.strictEqual(cfg.redteam_reflection.promptFile, "red-team-reflection");
   });
 });
 
@@ -92,22 +93,22 @@ describe("resolveRunModel", () => {
     assert.ok(pm.params?.some(p => p.id === "thinking" && p.value === "false"));
   });
 
-  it("redteam hors XL → composer-2 avec fast:false (thinking sur composer invalide pour l'API)", () => {
-    const rt = resolveRunModel("redteam", { issueSize: "S", frugal: false, env: {} });
+  it("security hors XL → composer-2 avec fast:false (thinking sur composer invalide pour l'API)", () => {
+    const rt = resolveRunModel("security", { issueSize: "S", frugal: false, env: {} });
     assert.strictEqual(rt.id, "composer-2");
     assert.ok(rt.params?.some(p => p.id === "fast" && p.value === "false"));
-    const rtl = resolveRunModel("redteam", { issueSize: "L", frugal: false, env: {} });
+    const rtl = resolveRunModel("security", { issueSize: "L", frugal: false, env: {} });
     assert.strictEqual(rtl.id, "composer-2");
     assert.ok(rtl.params?.some(p => p.id === "fast" && p.value === "false"));
   });
 
-  it("taille XL (architect Opus, dev/qa Composer slow, redteam Sonnet)", () => {
+  it("taille XL (architect Opus, dev/qa Composer slow, security Sonnet)", () => {
     const arch = resolveRunModel("architect", { issueSize: "XL", frugal: false, env: {} });
     assert.strictEqual(arch.id, "claude-opus-4-7");
     const dev = resolveRunModel("dev", { issueSize: "XL", frugal: false, env: {} });
     assert.strictEqual(dev.id, "composer-2");
     assert.ok(dev.params?.some(p => p.id === "fast" && p.value === "false"));
-    const rt = resolveRunModel("redteam", { issueSize: "XL", frugal: false, env: {} });
+    const rt = resolveRunModel("security", { issueSize: "XL", frugal: false, env: {} });
     assert.strictEqual(rt.id, "claude-sonnet-4-5");
   });
 

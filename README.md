@@ -2,8 +2,9 @@
 
 Orchestrateur d'équipe de développement IA basé sur le [Cursor SDK](https://cursor.com/docs/sdk/typescript).
 
-Transforme une idée en code déployé via le pipeline par défaut (**5 étapes**) :
-**PM → Architecte → Dev → QA → Red Team**.
+Transforme une idée en code déployé via le pipeline par défaut (**6 étapes, 2 macro-parties**) :
+**Réflexion -> Backlog : PM → Architecte → Red Team Réflexion**
+**Exécution : Dev → Sécurité → QA**.
 
 D’**autres agents** (UX, UI, DevOps, SRE, release, rédaction technique, privacy) sont disponibles **à la demande** (`npm run agent:<rôle>`) ; ils ne font pas partie du pipeline `full` pour limiter la durée des runs et éviter les régressions de flux.
 
@@ -15,8 +16,8 @@ Toi (super-superviseur)
   ▼
 Cursor SDK (orchestrateur TypeScript)
   │
-  ├── Pipeline full (séquentiel + boucles QA / Red Team)
-  │   ├── 📋 PM → 🏛️ Architect → 💻 Dev ⇄ 🧪 QA ⇄ 🔴 Red Team
+  ├── Pipeline full (2 macro-parties, sécurité avant QA)
+  │   ├── 📋 PM → 🏛️ Architect → 🧠 Red Team Réflexion → 💻 Dev ⇄ 🔐 Sécurité ⇄ 🧪 QA
   │
   └── Agents à la demande (même injection `projects/*.md`)
       ├── 🎨 UX / UI — parcours & wireframes ; présentation visuelle
@@ -68,7 +69,8 @@ npm run project -- monprojet --pipeline full \
 ### 4. Vérifications locales (contributeurs)
 
 - `npx tsc --noEmit` — typage TypeScript (idem CI).
-- `npm test` — tests sur le parse backlog PM et les heuristiques QA / Red Team.
+- `npm test` — tests sur le parse backlog PM et les heuristiques QA / sécurité.
+- `npm run test:coverage && npm run coverage:gate` — vérifie la couverture et bloque toute régression (et impose une légère hausse par défaut).
 - `npm run verify:prompts` — confirme la présence de tous les fichiers `src/prompts/*.md` référencés par les rôles agents.
 
 ## 📁 Structure du projet
@@ -82,7 +84,7 @@ ai-team-orchestrator/
 │   ├── agent-config.ts       # 📋 Prompts / `resolveRunModel` (grille S–XL + MODEL_*)
 │   ├── spend-guard.ts        # 💰 Garde-fou budgétaire (SPEND_ALERT_CENTS)
 │   ├── backlog.ts            # 📦 Parse backlog & sélection « next » issue
-│   ├── pipeline-detection.ts # ✅ Heuristiques verdict QA / Red Team
+│   ├── pipeline-detection.ts # ✅ Heuristiques verdict QA / sécurité
 │   ├── verify-prompts.ts     # CI : vérifie la présence des fichiers prompts
 │   ├── *.test.ts             # Tests (runner `tsx --test`)
 │   └── prompts/              # 🎭 Prompts des agents (génériques)
@@ -93,6 +95,7 @@ ai-team-orchestrator/
 │       ├── fullstack-dev.md
 │       ├── qa-engineer.md
 │       ├── red-team.md
+│       ├── red-team-reflection.md
 │       ├── devops-platform.md
 │       ├── sre-observability.md
 │       ├── release-manager.md
@@ -119,7 +122,7 @@ ai-team-orchestrator/
 ### Persistance locale (backlog & exécutions pipeline)
 
 - **`backlog.json`** : à chaque lecture, le contenu est validé (enums `status` / `priority` / `size`, dates ISO 8601, unicité des `id`). Un fichier corrompu ou mal typé provoque une erreur explicite plutôt qu’une corruption silencieuse.
-- **`pipeline-runs.json`** : chaque exécution de `npm run pipeline` (hors sous-commande `next`) ajoute une ligne d’historique avec `id`, brief (tronqué au-delà de ~50 ko), reprise éventuelle (`resumeFrom`), nombre d’itérations QA / Red Team, statut `success` | `partial` | `failed`, et horodatages.
+- **`pipeline-runs.json`** : chaque exécution de `npm run pipeline` (hors sous-commande `next`) ajoute une ligne d’historique avec `id`, brief (tronqué au-delà de ~50 ko), reprise éventuelle (`resumeFrom`), nombre d’itérations QA / sécurité, statut `success` | `partial` | `failed`, et horodatages.
 - **`pipeline:next`** : l’issue en cours reçoit `pipelineRun` = identifiant d’exécution (`run-<timestamp>-<suffix>`), réinitialisé si le pipeline échoue avant la fin.
 
 ## 🎯 Architecture multi-projets
@@ -154,7 +157,7 @@ local_path: ~/code_dev/mon-projet   # optionnel — chemin local vers le repo cl
 Au démarrage avec `npm run project -- monprojet` :
 - Le contexte est **injecté dans tous les prompts** des agents
 - `local_path` devient le **répertoire de travail** des agents locaux (PM, Architect) — ils voient et lisent le vrai code source
-- `repo` + `branch` définissent la cible des agents cloud (Dev, QA, Red Team)
+- `repo` + `branch` définissent la cible des agents cloud (Dev, sécurité, QA)
 
 ### Ajouter un nouveau projet
 
@@ -177,14 +180,15 @@ npm run project -- monprojet --role pm "Je veux un dashboard de statistiques"
 npm run project -- monprojet --role architect "Conçois le schéma BDD"
 npm run project -- monprojet --role dev "Implémente la page"
 npm run project -- monprojet --role qa "Review la PR #12"
-npm run project -- monprojet --role redteam "Audite la sécurité"
+npm run project -- monprojet --role redteam_reflection "Challenge produit/architecture"
+npm run project -- monprojet --role security "Audite la sécurité"
 npm run project -- monprojet --role ux "Esquisse les parcours"
 npm run project -- monprojet --role devops "Propose la CI"
 ```
 
 ### Mode pipeline complet
 
-Lance les 5 agents en séquence, chacun recevant le contexte du précédent :
+Lance les 2 macro-parties en séquence, chacun recevant le contexte du précédent :
 
 ```bash
 # --project est obligatoire
@@ -213,10 +217,10 @@ npm run project -- monprojet --pipeline full \
 **Mode d’exécution :** les étapes **Product Manager** et **Data Architect** tournent en **local** dans le répertoire défini par `local_path` du fichier projet (ou le cwd de l’orchestrateur si absent). À partir du **Développeur**, le pipeline utilise **cloud** Cursor contre le repo cible défini par `repo:` dans le fichier projet.
 
 Le pipeline inclut une **boucle de feedback** :
-- QA approuve → continue vers RedTeam
+- Sécurité (avant QA) approuve → passage à QA
+- Sécurité détecte failles critiques → relance Dev, puis re-audit (max 3 itérations)
 - QA demande changements → relance Dev, puis re-review (max 3 itérations)
-- RedTeam détecte failles critiques → relance Dev, puis re-audit (max 3 itérations)
-- RedTeam détecte failles mineures → passage avec documentation
+- Après retouche Dev issue de QA, la sécurité est re-challengée avant la QA suivante
 
 Le pipeline s'arrête à chaque **checkpoint** pour ta validation
 (via les hooks Cursor).
@@ -237,7 +241,7 @@ Le flux **full** ne couvre pas automatiquement les **artefacts CI/CD, Docker ou 
 | Action | Détail |
 |--------|--------|
 | **Revue avec critères sécu** | Un humain vérifie le diff sous `.github/workflows/`, `Dockerfile*`, Compose, manifests K8s/Helm, règles d’alerte / exporters. |
-| **Red Team ciblé** | Tâche dédiée sur le diff **infra / CI / config déploiement** (ne remplace pas la revue humaine sur environnements sensibles). |
+| **Sécurité ciblée** | Tâche dédiée sur le diff **infra / CI / config déploiement** (ne remplace pas la revue humaine sur environnements sensibles). |
 | **Protections de branches** | Review obligatoire + CI verte sur les PR qui touchent ces chemins (GitHub / GitLab selon le cas). |
 
 **Checklist minimale (workflows & conteneurs)** — à garder en tête lors des revues :

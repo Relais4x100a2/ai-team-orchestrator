@@ -34,4 +34,6 @@ jobs:
       # Vérifie que tous les prompts référencés par AGENT_CONFIG existent
       - run: npm run verify:prompts
 
-      - run: npm test
+      - run: npm run test:coverage
+
+      - run: npm run coverage:gate
