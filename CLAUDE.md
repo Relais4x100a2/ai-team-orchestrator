@@ -23,6 +23,7 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
   - `FRUGAL_DEFAULT` — override explicite (`true|false`) du mode frugal.
   - `SPEND_ALERT_CENTS` — seuil Team (centimes) ; au-delà, **mode frugal** : tous les agents utilisent `composer-2` (`src/spend-guard.ts`). Optionnel : `SPEND_CHECK_EMAIL` pour filtrer la dépense par utilisateur.
   - `CLOUD_AGENT_COOLDOWN_MS`, `CLOUD_AGENT_MAX_RETRIES` — pacing et retries cloud (anti-burst) dans `src/cloud-policy.ts`.
+  - `BRANCH_MISMATCH_POLICY` / `BRANCH_MISMATCH_TRUNK_BRANCHES` — cohérence `branch:` projet vs `last-run/<slug>/run-context.json` ; si la branche projet est une trunk (défaut `main`,`master`,`trunk`), réalignement auto du fichier après merge de PR (`src/project-branch-url.ts`, `src/orchestrator.ts`).
 
 ## Agents : clés CLI (`--role`) ⇄ fichier prompt
 

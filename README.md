@@ -224,8 +224,7 @@ Un index `last-run/<slug>/run-context.json` est aussi maintenu pour tracer les d
 
 > Compatibilité : les anciens fichiers `redteam.md` sont migrés automatiquement vers `security.md` s’ils existent encore.
 >
-> Sécurité de reprise : au lancement, l’orchestrateur compare la `branch:` du projet actif avec la dernière branche détectée dans `run-context.json` et affiche un warning en cas d’écart.
-> Par défaut, en cas d’écart, il demande confirmation interactive (`Continuer ? [y/N]`) pour permettre d’interrompre la pipeline.
+> Sécurité de reprise : au lancement, l’orchestrateur compare la `branch:` du projet actif avec la dernière branche détectée dans `run-context.json` et affiche un avertissement (ou demande confirmation) en cas d’écart. **Si la branche du projet est une branche d’intégration** (`main`, `master`, `trunk` par défaut, surcharge `BRANCH_MISMATCH_TRUNK_BRANCHES`), l’écart est traité comme **après merge** : `run-context.json` est **réaligné** sur le dépôt / branche du fichier projet et l’URL PR obsolète est retirée, sans prompt.
 
 ```bash
 # Lancer le PM pour générer le brief (sauvegardé dans last-run/monprojet/pm.md)
@@ -277,6 +276,8 @@ AUTO_GIT_SYNC_ROLES=all
 
 # En cas de mismatch de branche (projet vs run-context) :
 BRANCH_MISMATCH_POLICY=prompt  # prompt|warn|abort
+# Branches d'intégration (après merge, réalignement auto de run-context si branch: est dans cette liste) :
+# BRANCH_MISMATCH_TRUNK_BRANCHES=main,master,trunk,develop
 ```
 
 ### Agents hors pipeline

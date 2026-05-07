@@ -52,6 +52,11 @@ import {
   resolveBriefFilePath,
 } from "./models.js";
 import { appendPipelineRun } from "./pipeline-runs.js";
+import {
+  buildGitHubTreeUrlForProject,
+  extractBranchNameFromGitHubTreeUrl,
+  isTrunkBranch,
+} from "./project-branch-url.js";
 
 // Configure ripgrep path for local agent operations
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -282,13 +287,6 @@ function buildQAPipelineContext(innerMarkdown: string): string {
   ].join("\n");
 }
 
-function extractBranchFromGitHubBranchUrl(url: string | undefined): string | undefined {
-  if (!url) return undefined;
-  const match = url.match(/\/tree\/([^?#\s]+)/i);
-  if (!match?.[1]) return undefined;
-  return decodeURIComponent(match[1]);
-}
-
 function resolveBranchMismatchPolicy(): "prompt" | "warn" | "abort" {
   const raw = process.env.BRANCH_MISMATCH_POLICY?.trim().toLowerCase();
   if (raw === "warn" || raw === "abort" || raw === "prompt") return raw;
@@ -307,7 +305,7 @@ function getProjectBranchMismatchContext():
   const context = loadLastRunContext(lastRunDir);
   if (!context?.latestBranchUrl) return null;
 
-  const expectedBranch = extractBranchFromGitHubBranchUrl(context.latestBranchUrl);
+  const expectedBranch = extractBranchNameFromGitHubTreeUrl(context.latestBranchUrl);
   if (!expectedBranch) return null;
   const activeBranch = activeProject.branch?.trim();
   if (!activeBranch || activeBranch === expectedBranch) return null;
@@ -319,9 +317,40 @@ function getProjectBranchMismatchContext():
   };
 }
 
+/**
+ * Après merge manuel vers une branche d’intégration : aligne `latestBranchUrl` sur le projet
+ * et retire `latestPrUrl` (lien PR souvent obsolète).
+ */
+function resyncLastRunContextBranchToProjectTrunk(lastRunDir: string): boolean {
+  if (!activeProjectSlug || !activeProject) return false;
+  const treeUrl = buildGitHubTreeUrlForProject(activeProject);
+  if (!treeUrl) return false;
+  const previous = loadLastRunContext(lastRunDir);
+  const latestByRole = previous?.latestByRole ?? {};
+  const nextContext: LastRunContext = {
+    updatedAt: new Date().toISOString(),
+    projectSlug: activeProjectSlug,
+    latestByRole,
+    latestBranchUrl: treeUrl,
+  };
+  writeFileSync(resolve(lastRunDir, LAST_RUN_CONTEXT_FILE), JSON.stringify(nextContext, null, 2), "utf-8");
+  return true;
+}
+
 async function enforceProjectBranchGuard(): Promise<void> {
   const mismatch = getProjectBranchMismatchContext();
   if (!mismatch) return;
+
+  if (isTrunkBranch(mismatch.activeBranch)) {
+    const resynced = resyncLastRunContextBranchToProjectTrunk(resolveLastRunDir());
+    if (resynced) {
+      console.log(
+        `ℹ️  Branche projet « ${mismatch.activeBranch} » (intégration) : le last-run référençait encore « ${mismatch.expectedBranch} » ` +
+          "(cas fréquent après merge de PR). run-context.json a été réaligné sur la branche du projet ; l’URL PR précédente a été retirée.",
+      );
+      return;
+    }
+  }
 
   const details =
     "\n⚠️  Branch mismatch détecté entre projet actif et dernier run context.\n" +
