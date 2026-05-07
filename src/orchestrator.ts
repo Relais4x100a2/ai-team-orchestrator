@@ -163,10 +163,95 @@ function loadProject(filePath: string): ProjectContext {
 const AGENT_CONFIG = createAgentConfig();
 
 const LAST_RUN_BASE_DIR = resolve(__dirname, "../last-run");
+const LAST_RUN_CONTEXT_FILE = "run-context.json";
+const ROLE_OUTPUT_FILE: Record<AgentRole, string> = {
+  pm: "pm.md",
+  architect: "architect.md",
+  redteam_reflection: "redteam_reflection.md",
+  dev: "dev.md",
+  security: "security.md",
+  qa: "qa.md",
+  ux: "ux.md",
+  ui: "ui.md",
+  devops: "devops.md",
+  sre: "sre.md",
+  release: "release.md",
+  techwriter: "techwriter.md",
+  privacy: "privacy.md",
+};
+
+type LastRunContext = {
+  updatedAt: string;
+  projectSlug: string;
+  latestByRole: Partial<Record<AgentRole, string>>;
+  latestBranchUrl?: string;
+  latestPrUrl?: string;
+};
 
 function resolveLastRunDir(): string {
   if (activeProjectSlug) return resolve(LAST_RUN_BASE_DIR, activeProjectSlug);
   return LAST_RUN_BASE_DIR;
+}
+
+function detectGitHubBranchUrl(text: string): string | undefined {
+  const match = text.match(/https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/tree\/[^\s)]+/i);
+  return match?.[0];
+}
+
+function detectGitHubPrUrl(text: string): string | undefined {
+  const match = text.match(/https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(?:new\/[^\s)]+|\d+)/i);
+  return match?.[0];
+}
+
+function loadLastRunContext(lastRunDir: string): LastRunContext | null {
+  const contextPath = resolve(lastRunDir, LAST_RUN_CONTEXT_FILE);
+  if (!existsSync(contextPath)) return null;
+  try {
+    const raw = JSON.parse(readFileSync(contextPath, "utf-8")) as LastRunContext;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+function saveLastRunContext(
+  lastRunDir: string,
+  role: AgentRole,
+  contextText: string,
+): void {
+  if (!activeProjectSlug) return;
+  const previous = loadLastRunContext(lastRunDir);
+  const latestByRole = previous?.latestByRole ?? {};
+  latestByRole[role] = ROLE_OUTPUT_FILE[role];
+
+  const branchUrl =
+    detectGitHubBranchUrl(contextText) ??
+    previous?.latestBranchUrl;
+  const prUrl =
+    detectGitHubPrUrl(contextText) ??
+    previous?.latestPrUrl;
+
+  const nextContext: LastRunContext = {
+    updatedAt: new Date().toISOString(),
+    projectSlug: activeProjectSlug,
+    latestByRole,
+    latestBranchUrl: branchUrl,
+    latestPrUrl: prUrl,
+  };
+  writeFileSync(resolve(lastRunDir, LAST_RUN_CONTEXT_FILE), JSON.stringify(nextContext, null, 2), "utf-8");
+}
+
+function migrateLegacySecurityFile(lastRunDir: string): void {
+  const legacyPath = resolve(lastRunDir, "redteam.md");
+  const securityPath = resolve(lastRunDir, "security.md");
+  if (!existsSync(legacyPath) || existsSync(securityPath)) return;
+  try {
+    const legacy = readFileSync(legacyPath, "utf-8");
+    writeFileSync(securityPath, legacy, "utf-8");
+    console.log("   ♻️  Migration last-run: redteam.md copié vers security.md");
+  } catch (e) {
+    console.warn(`   ⚠️  Migration redteam.md -> security.md impossible : ${formatErrorMessage(e)}`);
+  }
 }
 
 /** URL du repo cible pour le mode cloud : projet actif ou .env */
@@ -338,8 +423,11 @@ async function runAgent(
       try {
         const lastRunDir = resolveLastRunDir();
         mkdirSync(lastRunDir, { recursive: true });
-        writeFileSync(resolve(lastRunDir, `${role}.md`), result, "utf-8");
-        console.log(`\n   💾 Sortie sauvegardée : last-run/${activeProjectSlug}/${role}.md`);
+        migrateLegacySecurityFile(lastRunDir);
+        const outputFile = ROLE_OUTPUT_FILE[role];
+        writeFileSync(resolve(lastRunDir, outputFile), result, "utf-8");
+        saveLastRunContext(lastRunDir, role, [task, options.additionalContext, result].filter(Boolean).join("\n\n"));
+        console.log(`\n   💾 Sortie sauvegardée : last-run/${activeProjectSlug}/${outputFile}`);
       } catch (e) {
         console.error(`   ⚠️  Impossible de sauvegarder la sortie last-run : ${(e as Error).message}`);
       }

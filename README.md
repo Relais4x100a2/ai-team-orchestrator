@@ -219,7 +219,10 @@ npm run project -- monprojet --pipeline backlog backward "Retours utilisateurs e
 - point d'entrée `architect` pour les tailles `M/L/XL`
 
 **Reprise et fichiers de brief :**
-Après chaque exécution d’un agent, sa sortie est automatiquement sauvegardée dans `last-run/<slug>/<role>.md` (où `<slug>` est le nom du fichier projet sans `.md`). Ces fichiers permettent de reprendre le pipeline sans repasser par les étapes précédentes.
+Après chaque exécution d’un agent, sa sortie est automatiquement sauvegardée dans `last-run/<slug>/<role>.md` (où `<slug>` est le nom du fichier projet sans `.md`).  
+Un index `last-run/<slug>/run-context.json` est aussi maintenu pour tracer les derniers artefacts (fichiers par rôle, URL de branche et URL de PR détectées) afin de faciliter les reprises ciblées.
+
+> Compatibilité : les anciens fichiers `redteam.md` sont migrés automatiquement vers `security.md` s’ils existent encore.
 
 ```bash
 # Lancer le PM pour générer le brief (sauvegardé dans last-run/monprojet/pm.md)
