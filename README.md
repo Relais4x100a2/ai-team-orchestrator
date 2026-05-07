@@ -248,6 +248,27 @@ Le pipeline inclut une **boucle de feedback** :
 Le pipeline s'arrête à chaque **checkpoint** pour ta validation
 (via les hooks Cursor).
 
+### Sync Git auto avant agent
+
+Par défaut, l’orchestrateur tente une synchronisation Git locale **avant les rôles d’exécution** (`dev`, `security`, `qa`) sur la branche courante (main ou branche pertinente) :
+- `git fetch --prune`
+- `git pull --ff-only` si la branche est en retard
+
+Cette sync est volontairement **best effort** et non bloquante : elle est ignorée si le working tree n’est pas propre, s’il n’y a pas d’upstream, ou en cas de divergence locale/distante.
+
+Modes disponibles :
+- `AUTO_GIT_SYNC_MODE=safe` (défaut) : jamais de push auto
+- `AUTO_GIT_SYNC_MODE=aggressive` : push auto si la branche locale est en avance
+
+Configuration :
+```bash
+AUTO_GIT_SYNC_BEFORE_AGENT=false
+AUTO_GIT_SYNC_MODE=safe
+AUTO_GIT_SYNC_ROLES=dev,security,qa
+# ou
+AUTO_GIT_SYNC_ROLES=all
+```
+
 ### Agents hors pipeline
 
 Les rôles **`ux`**, **`ui`**, **`devops`**, **`sre`**, **`release`**, **`techwriter`**, **`privacy`** se lancent comme n'importe quel autre agent avec `--role <clé>`. Ils ne sont **pas** enchaînés automatiquement après `fullPipeline`.
