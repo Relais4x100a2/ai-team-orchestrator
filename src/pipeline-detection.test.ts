@@ -114,4 +114,17 @@ describe("detectSecurityVerdict", () => {
       "MEDIUM_ISSUES"
     );
   });
+
+  it("n'escalade pas en critique si la section dit « Aucune identifiée »", () => {
+    const report = `## Audit
+
+### Vulnérabilités critiques (à corriger immédiatement)
+
+**Aucune identifiée** pour ce périmètre.
+
+### Vulnérabilités moyennes (à planifier)
+
+1. Risque modéré de configuration.`;
+    assert.strictEqual(detectSecurityVerdict(report), "MEDIUM_ISSUES");
+  });
 });

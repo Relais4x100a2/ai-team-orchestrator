@@ -102,6 +102,44 @@ function containsRequestChangesHaystack(haystack: string): boolean {
   return false;
 }
 
+function extractMarkdownSectionByHeading(markdown: string, headingContains: string): string | null {
+  const lines = markdown.split(/\r?\n/);
+  const target = normalizeAccents(headingContains);
+  let startIndex = -1;
+  let headingLevel = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i]!.match(/^\s*(#{1,6})\s+(.+?)\s*$/);
+    if (!m) continue;
+    const [, hashes, text] = m;
+    if (normalizeAccents(text).includes(target)) {
+      startIndex = i + 1;
+      headingLevel = hashes.length;
+      break;
+    }
+  }
+  if (startIndex === -1) return null;
+
+  const out: string[] = [];
+  for (let i = startIndex; i < lines.length; i++) {
+    const m = lines[i]!.match(/^\s*(#{1,6})\s+(.+?)\s*$/);
+    if (m && m[1]!.length <= headingLevel) break;
+    out.push(lines[i]!);
+  }
+  return out.join("\n").trim() || null;
+}
+
+function hasExplicitNoCriticalSignal(section: string): boolean {
+  const n = normalizeAccents(section);
+  return (
+    /\baucune?\s+identifiee\b/.test(n) ||
+    /\baucune?\s+detectee\b/.test(n) ||
+    /\baucune?\s+trouvee\b/.test(n) ||
+    /\bno\s+critical\s+vulnerabilit(?:y|ies)\b/.test(n) ||
+    /\bnone\s+(?:identified|detected|found)\b/.test(n)
+  );
+}
+
 /** Déduit si QA approuve ou demande des changements à partir du texte du rapport. */
 export function detectQAVerdict(qaReport: string): QAVerdict {
   const fromLine = verdictFromDirectiveLine(qaReport);
@@ -130,13 +168,19 @@ export function detectQAVerdict(qaReport: string): QAVerdict {
 
 /** Déduit le niveau d’alerte sécurité à partir du texte du rapport Sécurité. */
 export function detectSecurityVerdict(securityReport: string): SecurityVerdict {
-  const lowerReport = securityReport.toLowerCase();
-  if (
+  const bodySansBlocsCode = stripMarkdownFencedCodeBlocks(securityReport);
+  const lowerReport = bodySansBlocsCode.toLowerCase();
+
+  const criticalSection = extractMarkdownSectionByHeading(bodySansBlocsCode, "vulnérabilités critiques");
+  if (criticalSection && hasExplicitNoCriticalSignal(criticalSection)) {
+    // On continue pour détecter d'éventuelles vulnérabilités moyennes.
+  } else if (
     lowerReport.includes("🚨 vulnérabilités critiques") ||
     lowerReport.includes("vulnérabilités critiques")
   ) {
     return "CRITICAL_ISSUES";
   }
+
   if (
     lowerReport.includes("⚠️ vulnérabilités moyennes") ||
     lowerReport.includes("vulnérabilités moyennes")
