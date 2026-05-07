@@ -13,7 +13,7 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
 
 - TypeScript (Node.js) pour l'orchestrateur
 - Cursor SDK (@cursor/sdk) pour les agents
-- Modèles : `MODEL_STRONG` / `MODEL_FAST` et `MODEL_<ROLE>` dans `.env`, résolus dans `resolveRunModel()` (`src/agent-config.ts`) — utilisé par `runAgent` et par `createAgentConfig()` (invocations sans taille d'issue). Sur `pipeline next`, la **taille d'issue** du backlog (`S`/`M`/`L`/`XL`) applique une grille coût/qualité pour les rôles pipeline (détail dans `agent-config.ts`).
+- Modèles : `MODEL_STRONG` / `MODEL_FAST` et `MODEL_<ROLE>` dans `.env`, résolus dans `resolveRunModel()` (`src/agent-config.ts`) — utilisé par `runAgent` et par `createAgentConfig()` (invocations sans taille d'issue). Sur `pipeline next`, la **taille d'issue** du backlog (`S`/`M`/`L`/`XL`) applique une grille coût/qualité pour les rôles pipeline (détail dans `agent-config.ts`) sans changer le point d'entrée du pipeline (PM par défaut).
 - Projets **cibles** multiples (configuration via `projects/*.md`)
 - **Variables `.env` utiles**
   - `CURSOR_API_KEY` — obligatoire pour lancer les agents
@@ -55,9 +55,11 @@ npm run verify:prompts  # Vérifie que tous les `src/prompts/*.md` référencés
 
 npm run start        # Aide interactive + liste des rôles (--role)
 
-# Pipeline : PM → Architect → Red Team Réflexion → Dev ⇄ Sécurité ⇄ QA
+# Pipeline full : PM → Architect → Red Team Réflexion → Dev ⇄ Sécurité ⇄ QA
 npm run pipeline     # équivalent à --pipeline full
 npm run pipeline:next # prochaine issue du backlog.json
+npm run pipeline backlog forward "Meta-vision"
+npm run pipeline backlog backward "Feedback"
 
 npm run pm:backlog   # PM en cloud → enrichit backlog.json
 npm run backlog      # Synthèse du backlog
@@ -84,7 +86,7 @@ npm run agent:privacy
 |--------|------|
 | `--project <fichier>` | Charge `projects/…`. Fichier `last-run/<slug>/` pour les sorties et le backlog dédié. |
 | `--brief-file <fichier>` | Brief ou tâche lus depuis un fichier (chemins relatifs au cwd ou absolus). Utile avec `last-run/<slug>/pm.md`. |
-| `--resume-from <étape>` | Reprend le pipeline : `pm` \| `architect` \| `redteam_reflection` \| `dev` \| `security` \| `qa`. Le brief fourni remplace le contexte des étapes ignorées. |
+| `--resume-from <étape>` | Reprend le pipeline : `pm` \| `architect` \| `redteam_reflection` \| `dev` \| `security` \| `qa`. Le brief fourni remplace le contexte des étapes ignorées. (`pipeline next` démarre par défaut en exécution: `dev` pour `S`, `architect` pour `M/L/XL`) |
 | `--sync-issues` | Crée les issues GitHub manquantes depuis `backlog.json`. Exige `--project` avec `repo:` dans le frontmatter et `GITHUB_TOKEN` dans `.env`. |
 
 Exemples :

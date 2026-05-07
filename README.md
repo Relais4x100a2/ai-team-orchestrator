@@ -198,6 +198,26 @@ npm run project -- monprojet --pipeline full "Brief de la fonctionnalité"
 npm run project -- monprojet --pipeline next
 ```
 
+Par défaut, `pipeline next` lance uniquement la partie exécution (depuis `dev` pour `S`, depuis `architect` pour `M/L/XL`). Pour changer le point d'entrée, utiliser explicitement `--resume-from`.
+
+### Mode pipeline backlog (partie 1)
+
+Utilise la partie réflexion pour générer ou réviser le backlog:
+
+```bash
+# Génération backlog depuis une métavision (top-down)
+npm run project -- monprojet --pipeline backlog forward "Vision produit cible"
+
+# Révision backlog depuis feedback terrain (bottom-up)
+npm run project -- monprojet --pipeline backlog backward "Retours utilisateurs et testeurs"
+```
+
+### Mode pipeline next (partie 2)
+
+`pipeline next` exécute uniquement la partie exécution backlog -> QA:
+- point d'entrée `dev` pour les tailles `S`
+- point d'entrée `architect` pour les tailles `M/L/XL`
+
 **Reprise et fichiers de brief :**
 Après chaque exécution d’un agent, sa sortie est automatiquement sauvegardée dans `last-run/<slug>/<role>.md` (où `<slug>` est le nom du fichier projet sans `.md`). Ces fichiers permettent de reprendre le pipeline sans repasser par les étapes précédentes.
 

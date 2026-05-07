@@ -488,7 +488,19 @@ async function pipelineNext() {
     ? `\n\nCette implémentation doit refermer l'issue GitHub #${issue.githubIssueNumber} — inclure \`close #${issue.githubIssueNumber}\` dans le message de commit ou la description de PR.`
     : "";
   try {
-    await fullPipeline(issue.description + issueRef, { pipelineRunId, issueSize: issue.size });
+    const executionStartBySize: Record<IssueSize, PipelineStep> = {
+      S: "dev",
+      M: "architect",
+      L: "architect",
+      XL: "architect",
+    };
+    const executionStart = executionStartBySize[issue.size];
+    await fullPipeline(issue.description + issueRef, {
+      pipelineRunId,
+      issueSize: issue.size,
+      resumeFrom: executionStart,
+      mode: "execution",
+    });
 
     // Mark done (re-read backlog to avoid conflicts)
     const freshBacklog = loadBacklog();
@@ -527,6 +539,83 @@ async function pipelineNext() {
   }
 }
 
+async function pipelineBacklogReflection(
+  direction: "forward" | "backward",
+  brief: string,
+): Promise<void> {
+  const source = direction === "forward" ? "top_down" : "bottom_up";
+  const label = direction === "forward" ? "métavision (top-down)" : "feedback (bottom-up)";
+  console.log("═".repeat(60));
+  console.log(`🧭 PIPELINE BACKLOG (${direction}) — Réflexion -> Backlog`);
+  console.log("═".repeat(60));
+  console.log(`   Source attendue : ${label}`);
+
+  const frugal = await checkFrugalMode(process.env);
+  const pmTask = direction === "forward"
+    ? "À partir de cette métavision, génère/structure des user stories backlog actionnables avec priorités, tailles et critères d'acceptation."
+    : "À partir de ce feedback terrain, révise et complète le backlog en ajustant priorités, tailles et critères d'acceptation.";
+  const specs = await runAgent("pm", pmTask, {
+    additionalContext: brief,
+    frugal,
+  });
+
+  const architecture = await runAgent(
+    "architect",
+    "Produit la vision architecture cible pour les items Must/Should du backlog (cible, hypothèses/contraintes, alternative, risques).",
+    { additionalContext: specs, frugal }
+  );
+
+  const reflection = await runAgent(
+    "redteam_reflection",
+    "Challenge la cohérence produit/architecture et propose les ajustements backlog nécessaires.",
+    { additionalContext: `## Backlog\n${specs}\n\n## Vision architecture\n${architecture}`, frugal }
+  );
+
+  const parsedIssues = parsePMOutput(specs);
+  if (parsedIssues.length === 0) {
+    console.log("⚠️  Aucune issue parsée depuis la sortie PM — backlog non modifié.");
+    return;
+  }
+
+  const backlog = loadBacklog();
+  const now = new Date().toISOString();
+  const architectureSummary = previewText(architecture, 500);
+  const reflectionSummary = previewText(reflection, 500);
+
+  for (const parsed of parsedIssues) {
+    const existing = backlog.issues.find(i => i.title.trim().toLowerCase() === parsed.title.trim().toLowerCase());
+    if (existing) {
+      existing.description = parsed.description;
+      existing.priority = parsed.priority;
+      existing.size = parsed.size;
+      existing.source = source;
+      if (existing.priority === "MUST" || existing.priority === "SHOULD") {
+        existing.architectureVision = architectureSummary;
+        existing.reflectionChallenge = reflectionSummary;
+      }
+      existing.updatedAt = now;
+      continue;
+    }
+
+    const id = generateIssueId(backlog);
+    backlog.issues.push({
+      ...parsed,
+      id,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+      pipelineRun: null,
+      source,
+      architectureVision: parsed.priority === "MUST" || parsed.priority === "SHOULD" ? architectureSummary : undefined,
+      reflectionChallenge: parsed.priority === "MUST" || parsed.priority === "SHOULD" ? reflectionSummary : undefined,
+    });
+  }
+
+  saveBacklog(backlog);
+  console.log(`\n✅ Backlog mis à jour via pipeline backlog ${direction} (${parsedIssues.length} item(s) traités).`);
+  printBacklogSummary(backlog);
+}
+
 // ------------------------------------------------------------
 // Pipelines
 // ------------------------------------------------------------
@@ -544,18 +633,16 @@ async function pipelineNext() {
  */
 async function fullPipeline(
   brief: string,
-  opts: { resumeFrom?: PipelineStep; pipelineRunId?: string; issueSize?: IssueSize } = {}
+  opts: {
+    resumeFrom?: PipelineStep;
+    pipelineRunId?: string;
+    issueSize?: IssueSize;
+    mode?: "full" | "execution";
+  } = {}
 ) {
-  // Routing par taille : S → dev direct, M → architect, L/XL → réflexion complète
-  // Un --resume-from explicite prend toujours le dessus.
-  const sizeBasedStart: Record<IssueSize, PipelineStep> = {
-    S: "dev",
-    M: "architect",
-    L: "pm",
-    XL: "pm",
-  };
-  const resumeFrom = opts.resumeFrom
-    ?? (opts.issueSize ? sizeBasedStart[opts.issueSize] : "pm");
+  // Mode full: démarre en réflexion (PM). Mode execution: démarre depuis l'étape donnée ou dev.
+  const isExecutionOnly = opts.mode === "execution";
+  const resumeFrom = opts.resumeFrom ?? (isExecutionOnly ? "dev" : "pm");
   const startIdx = PIPELINE_STEPS.indexOf(resumeFrom);
   const runId = opts.pipelineRunId ?? newPipelineRunId();
   const startedAt = new Date().toISOString();
@@ -583,16 +670,17 @@ async function fullPipeline(
 
   try {
     console.log("═".repeat(60));
-    console.log("🏗️  PIPELINE FULL — Réflexion -> Backlog -> Exécution -> QA");
+    console.log(
+      isExecutionOnly
+        ? "🏗️  PIPELINE NEXT — Exécution Backlog -> QA"
+        : "🏗️  PIPELINE FULL — Réflexion -> Backlog -> Exécution -> QA"
+    );
     if (pipelineIssueSize) {
       console.log(`   📐 Taille issue (grille modèles) : ${pipelineIssueSize}`);
     }
     if (resumeFrom !== "pm") {
-      const reason = opts.resumeFrom
-        ? "--resume-from explicite"
-        : `routing taille ${opts.issueSize ?? "?"}`;
+      const reason = "--resume-from explicite";
       console.log(`   ⏩ Démarrage depuis : ${resumeFrom.toUpperCase()} (${reason})`);
-      if (!opts.resumeFrom) console.log(`   📄 Brief d'origine transmis directement au Dev.`);
     }
     console.log("═".repeat(60));
 
@@ -603,7 +691,7 @@ async function fullPipeline(
     let reflectionChallenge = "";
 
     // ── Étape 1 : Product Manager (Réflexion) ──
-    if (startIdx <= 0) {
+    if (!isExecutionOnly && startIdx <= 0) {
       console.log("\n📋 ÉTAPE 1/6 — Product Manager (Réflexion -> Backlog)");
       const pmOutput = await runAgent(
         "pm",
@@ -613,16 +701,20 @@ async function fullPipeline(
       if (pmOutput.trim()) {
         specs = pmOutput;
       }
-    } else {
+    } else if (!isExecutionOnly) {
       console.log("\n📋 ÉTAPE 1/6 — Product Manager : ⏭  ignoré (--resume-from)");
+    } else {
+      console.log("\n📋 ÉTAPE 1/6 — Product Manager : ⏭  ignoré (mode execution)");
     }
 
-    // ── Étape 2 : Architect (cadrage architecture amont) ──
+    // ── Étape 2 : Architect (cadrage architecture amont, ou garde-fou execution selon taille) ──
     if (startIdx <= 1) {
-      console.log("\n🏛️  ÉTAPE 2/6 — Data Architect (Vision architecture)");
+      console.log("\n🏛️  ÉTAPE 2/6 — Data Architect");
       architectureVision = await runAgent(
         "architect",
-        "Établis la vision architecture cible, les contraintes, une alternative crédible et les risques principaux pour les items Must/Should.",
+        isExecutionOnly
+          ? "Fournis un cadrage architecture ciblé pour sécuriser l'exécution de ce backlog item (contraintes, risques, points d'attention)."
+          : "Établis la vision architecture cible, les contraintes, une alternative crédible et les risques principaux pour les items Must/Should.",
         { additionalContext: specs, frugal, issueSize: pipelineIssueSize }
       );
     } else {
@@ -630,7 +722,7 @@ async function fullPipeline(
     }
 
     // ── Étape 3 : Red Team Réflexion (challenge produit + architecture) ──
-    if (startIdx <= 2) {
+    if (!isExecutionOnly && startIdx <= 2) {
       console.log("\n🧠 ÉTAPE 3/6 — Red Team Réflexion");
       reflectionChallenge = await runAgent(
         "redteam_reflection",
@@ -641,8 +733,10 @@ async function fullPipeline(
           issueSize: pipelineIssueSize,
         }
       );
-    } else {
+    } else if (!isExecutionOnly) {
       console.log("\n🧠 ÉTAPE 3/6 — Red Team Réflexion : ⏭  ignoré (--resume-from)");
+    } else {
+      console.log("\n🧠 ÉTAPE 3/6 — Red Team Réflexion : ⏭  ignoré (mode execution)");
     }
 
     // ── Exécution : Dev -> Sécurité -> QA ──
@@ -950,10 +1044,19 @@ async function main() {
     const subcommand = args[pipelineFlag + 1];
     if (subcommand === "next") {
       await pipelineNext();
+    } else if (subcommand === "backlog") {
+      const direction = args[pipelineFlag + 2];
+      if (direction !== "forward" && direction !== "backward") {
+        console.error("❌ --pipeline backlog attend 'forward' ou 'backward'.");
+        process.exit(1);
+      }
+      const briefFromCli = args.slice(pipelineFlag + 3).join(" ");
+      const brief = briefFromFile ?? (briefFromCli || "Structurer ou réviser le backlog selon le contexte fourni.");
+      await pipelineBacklogReflection(direction, brief);
     } else {
       const briefFromCli = args.slice(pipelineFlag + 1).join(" ");
       const brief = briefFromFile ?? (briefFromCli || "Analyse le projet existant et propose des améliorations.");
-      await fullPipeline(brief, { resumeFrom });
+      await fullPipeline(brief, { resumeFrom, mode: "full" });
     }
   } else if (args.includes("--sync-issues")) {
     // Mode sync GitHub Issues : crée les issues manquantes depuis backlog.json
@@ -993,6 +1096,12 @@ Usage :
   npm run pipeline "Brief complet du projet"
     → Lance le pipeline complet : PM → Archi → Red Team Réflexion → Dev → Sécurité → QA
 
+  npm run project -- monprojet --pipeline backlog forward "Méta-vision produit"
+    → Lance la partie réflexion et met à jour backlog.json (top-down)
+
+  npm run project -- monprojet --pipeline backlog backward "Feedback utilisateur/testeurs"
+    → Lance la partie réflexion et révise backlog.json (bottom-up)
+
   npm run pm:backlog
     → PM analyse le repo et génère backlog.json avec issues prioritaires
 
@@ -1003,7 +1112,7 @@ Usage :
     → Exécute les tests unitaires (validation backlog.json côté modèle)
 
   npm run pipeline:next
-    → Prend la prochaine issue MUST→SHOULD→COULD et lance le pipeline complet
+    → Prend la prochaine issue MUST→SHOULD→COULD et lance la partie exécution (depuis dev, ou architect selon taille)
 
   npm run project:dataset-style -- --backlog
     → Lance une commande avec contexte projet spécifique
