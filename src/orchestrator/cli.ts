@@ -1,0 +1,192 @@
+import { existsSync, readFileSync } from "fs";
+import { basename } from "path";
+import { PIPELINE_STEPS, type AgentRole, type PipelineStep } from "../agent-config.js";
+import { resolveBriefFilePath } from "../models.js";
+import { checkFrugalMode } from "../spend-guard.js";
+import { syncBacklogToGitHub } from "../github-sync.js";
+import { runAgent, AGENT_CONFIG } from "./agent-runner.js";
+import { enforceProjectBranchGuard } from "./branch-guard.js";
+import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
+import { loadProject } from "./project-loader.js";
+import { resolveUserPath } from "./paths-and-env.js";
+import { emptyOrchestratorSession } from "./session.js";
+import {
+  fullPipeline,
+  pipelineNext,
+  pipelineBacklogReflection,
+  pmBacklogWorkflow,
+} from "./workflows.js";
+
+export async function main(): Promise<void> {
+  if (!process.env.CURSOR_API_KEY) {
+    console.error("❌ CURSOR_API_KEY manquante. Copie .env.example en .env et remplis-la.");
+    process.exit(1);
+  }
+
+  const session = emptyOrchestratorSession();
+  const args = process.argv.slice(2);
+
+  const projectFlag = args.indexOf("--project");
+  if (projectFlag !== -1) {
+    let projectPath = args[projectFlag + 1];
+    if (!projectPath || projectPath.startsWith("--")) {
+      console.error("❌ --project nécessite un nom ou un chemin (ex. geneweb-py ou projects/geneweb-py.md).");
+      process.exit(1);
+    }
+    if (!projectPath.includes("/") && !projectPath.endsWith(".md")) {
+      projectPath = `projects/${projectPath}.md`;
+    }
+    session.activeProject = loadProject(projectPath);
+    session.activeProjectSlug =
+      basename(projectPath, ".md")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || null;
+    console.log(`🎯 Projet : ${session.activeProject.name} (${session.activeProject.branch})`);
+  }
+
+  let briefFromFile: string | null = null;
+  const briefFileFlag = args.indexOf("--brief-file");
+  if (briefFileFlag !== -1 && args[briefFileFlag + 1]) {
+    let briefFilePath: string;
+    try {
+      briefFilePath = resolveBriefFilePath(args[briefFileFlag + 1], process.cwd());
+    } catch (e) {
+      console.error(`❌ --brief-file : ${(e as Error).message}`);
+      process.exit(1);
+    }
+    if (!existsSync(briefFilePath)) {
+      console.error(`❌ --brief-file : fichier introuvable : ${briefFilePath}`);
+      process.exit(1);
+    }
+    const { displayPath: briefDisplay } = resolveUserPath(briefFilePath);
+    briefFromFile = readFileSync(briefFilePath, "utf-8").trim();
+    console.log(`📄 Brief chargé depuis : ${briefDisplay}`);
+  }
+
+  await enforceProjectBranchGuard(session);
+
+  let resumeFrom: PipelineStep | undefined;
+  const resumeFlag = args.indexOf("--resume-from");
+  if (resumeFlag !== -1 && args[resumeFlag + 1]) {
+    const step = args[resumeFlag + 1] as PipelineStep;
+    if (!PIPELINE_STEPS.includes(step)) {
+      console.error(`❌ --resume-from : étape inconnue « ${step} »`);
+      console.error(`   Étapes valides : ${PIPELINE_STEPS.join(", ")}`);
+      process.exit(1);
+    }
+    resumeFrom = step;
+  }
+
+  const roleFlag = args.indexOf("--role");
+  const pipelineFlag = args.indexOf("--pipeline");
+  const pmBacklogFlag = args.indexOf("--pm-backlog");
+  const backlogFlag = args.indexOf("--backlog");
+
+  if (roleFlag !== -1 && args[roleFlag + 1]) {
+    const role = args[roleFlag + 1] as AgentRole;
+    const taskFromCli = args.slice(roleFlag + 2).join(" ").trim();
+    let task: string;
+    let additionalContext: string | undefined;
+    if (briefFromFile && taskFromCli) {
+      task = taskFromCli;
+      additionalContext = briefFromFile;
+    } else {
+      task = briefFromFile ?? (taskFromCli || "Analyse le projet et propose des améliorations.");
+    }
+
+    if (!(role in AGENT_CONFIG)) {
+      console.error(`❌ Rôle inconnu : ${role}`);
+      console.error(`   Rôles disponibles : ${Object.keys(AGENT_CONFIG).join(", ")}`);
+      process.exit(1);
+    }
+
+    const frugal = await checkFrugalMode(process.env);
+    await runAgent(session, role, task, { cloud: true, frugal, additionalContext });
+  } else if (pipelineFlag !== -1) {
+    const subcommand = args[pipelineFlag + 1];
+    if (subcommand === "next") {
+      await pipelineNext(session);
+    } else if (subcommand === "backlog") {
+      const direction = args[pipelineFlag + 2];
+      if (direction !== "forward" && direction !== "backward") {
+        console.error("❌ --pipeline backlog attend 'forward' ou 'backward'.");
+        process.exit(1);
+      }
+      const briefFromCli = args.slice(pipelineFlag + 3).join(" ");
+      const brief = briefFromFile ?? (briefFromCli || "Structurer ou réviser le backlog selon le contexte fourni.");
+      await pipelineBacklogReflection(session, direction, brief);
+    } else {
+      const briefFromCli = args.slice(pipelineFlag + 1).join(" ");
+      const brief = briefFromFile ?? (briefFromCli || "Analyse le projet existant et propose des améliorations.");
+      await fullPipeline(session, brief, { resumeFrom, mode: "full" });
+    }
+  } else if (args.includes("--sync-issues")) {
+    if (!session.activeProject?.repo) {
+      console.error("❌ --sync-issues nécessite --project avec un champ repo: dans le frontmatter.");
+      process.exit(1);
+    }
+    const token = process.env.GITHUB_TOKEN;
+    if (!token) {
+      console.error("❌ --sync-issues nécessite GITHUB_TOKEN dans .env.");
+      process.exit(1);
+    }
+    const backlog = loadBacklog(session);
+    const count = await syncBacklogToGitHub(backlog, session.activeProject.repo, token);
+    if (count > 0) saveBacklog(session, backlog);
+  } else if (pmBacklogFlag !== -1) {
+    await pmBacklogWorkflow(session);
+  } else if (backlogFlag !== -1) {
+    printBacklogSummary(session);
+  } else {
+    console.log(`
+╔══════════════════════════════════════════════════════════╗
+║         🤖 AI Team Orchestrator — v0.1.0                ║
+╚══════════════════════════════════════════════════════════╝
+
+Usage :
+  npm run agent:pm "Brief de la fonctionnalité"
+  npm run agent:architect "Conçois le modèle de données pour X"
+  npm run agent:dev "Implémente la page d'upload de dataset"
+  npm run agent:qa "Review la PR #42"
+  npm run agent:security "Audite la sécurité de l'app"
+  npm run agent:redteam_reflection "Challenge produit/architecture"
+
+  npm run pipeline "Brief complet du projet"
+    → Lance le pipeline complet : PM → Archi → Red Team Réflexion → Dev → Sécurité → QA
+
+  npm run project -- monprojet --pipeline backlog forward "Méta-vision produit"
+    → Lance la partie réflexion et met à jour backlog.json (top-down)
+
+  npm run project -- monprojet --pipeline backlog backward "Feedback utilisateur/testeurs"
+    → Lance la partie réflexion et révise backlog.json (bottom-up)
+
+  npm run pm:backlog
+    → PM analyse le repo et génère backlog.json avec issues prioritaires
+
+  npm run backlog
+    → Affiche l'état du backlog (todo/in_progress/done)
+
+  npm test
+    → Exécute les tests unitaires (validation backlog.json côté modèle)
+
+  npm run pipeline:next
+    → Prend la prochaine issue MUST→SHOULD→COULD et lance la partie exécution (depuis dev, ou architect selon taille)
+
+Options globales :
+  --project <file>
+    → Charge le contexte du projet depuis projects/<file>.md
+
+  --brief-file <file>
+    → Lit le brief depuis un fichier. Avec --role + tâche CLI, le fichier devient le contexte additionnel.
+
+  --resume-from <step>
+    → Reprend le pipeline : pm | architect | redteam_reflection | dev | security | qa
+
+Agents disponibles :
+${Object.entries(AGENT_CONFIG)
+  .map(([key, val]) => `  ${key.padEnd(12)} ${val.description}`)
+  .join("\n")}
+    `);
+  }
+}

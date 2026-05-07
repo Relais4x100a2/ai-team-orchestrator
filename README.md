@@ -80,7 +80,8 @@ ai-team-orchestrator/
 ├── src/
 │   ├── models.ts             # 📐 Schéma backlog / pipeline (validation stricte)
 │   ├── pipeline-runs.ts      # 📝 Append des exécutions pipeline → pipeline-runs.json
-│   ├── orchestrator.ts       # 🧠 Script principal (le cerveau)
+│   ├── orchestrator.ts       # 🧠 Point d'entrée CLI (bootstrap → orchestrator/cli)
+│   ├── orchestrator/         # Workflows pipeline, chargement projet, agents CLI
 │   ├── agent-config.ts       # 📋 Prompts / `resolveRunModel` (grille S–XL + MODEL_*)
 │   ├── spend-guard.ts        # 💰 Garde-fou budgétaire (SPEND_ALERT_CENTS)
 │   ├── backlog.ts            # 📦 Parse backlog & sélection « next » issue
@@ -323,7 +324,7 @@ le comportement d'un agent :
 ### Ajouter un nouvel agent
 
 1. Crée `src/prompts/mon-agent.md` avec le prompt
-2. Ajoute sa config dans `AGENT_CONFIG` dans `orchestrator.ts`
+2. Ajoute son entrée dans `AGENT_DEFINITIONS` dans `src/agent-config.ts`
 3. Ajoute le script npm dans `package.json` si voulu
 
 ## 🔧 Avec Claude Code

@@ -41,6 +41,11 @@ Entité: NomEntité
 ### Conséquences : ce que ça implique pour l'équipe
 ```
 
+## Contexte d'invocation (backlog vs exécution ticket)
+
+- **Réflexion backlog** : tu produis une **vision architecture** large pour tout le backlog (priorités, hypothèses, alternatives, risques transverses).
+- **Exécution d'un ticket** : tu cadres **uniquement** ce qui est décrit dans le brief / le backlog item ; si une vision ou un défi backlog est fourni en contexte, tu t’y alignes et tu mentionnes explicitement les **écarts** ou **précisions** par rapport au ticket en cours.
+
 ## Règles
 
 - Tu privilégies la **simplicité** : pas d'over-engineering.

@@ -18,12 +18,13 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
 - **Variables `.env` utiles**
   - `CURSOR_API_KEY` — obligatoire pour lancer les agents
   - `TARGET_REPO_URL`, `TARGET_BRANCH` — fallback si pas de `--project` (mode cloud)
-  - `GITHUB_TOKEN` — pour `--sync-issues` (API Issues) et, si `GITHUB_CLOSE_ISSUE_ON_PIPELINE_DONE=1` (opt-in), fermeture automatique de l’issue GitHub après un `pipeline next` réussi (`src/github-sync.ts`, `src/orchestrator.ts`)
+  - `GITHUB_TOKEN` — pour `--sync-issues` (API Issues) et, si `GITHUB_CLOSE_ISSUE_ON_PIPELINE_DONE=1` (opt-in), fermeture automatique de l’issue GitHub après un `pipeline next` réussi (`src/github-sync.ts`, `src/orchestrator/workflows.ts`)
   - `CURSOR_BILLING_MODE` — `solo` (défaut recommandé Pro/Pro+/Ultra) ou `team`.
   - `FRUGAL_DEFAULT` — override explicite (`true|false`) du mode frugal.
   - `SPEND_ALERT_CENTS` — seuil Team (centimes) ; au-delà, **mode frugal** : tous les agents utilisent `composer-2` (`src/spend-guard.ts`). Optionnel : `SPEND_CHECK_EMAIL` pour filtrer la dépense par utilisateur.
   - `CLOUD_AGENT_COOLDOWN_MS`, `CLOUD_AGENT_MAX_RETRIES` — pacing et retries cloud (anti-burst) dans `src/cloud-policy.ts`.
-  - `BRANCH_MISMATCH_POLICY` / `BRANCH_MISMATCH_TRUNK_BRANCHES` — cohérence `branch:` projet vs `last-run/<slug>/run-context.json` ; si la branche projet est une trunk (défaut `main`,`master`,`trunk`), réalignement auto du fichier après merge de PR (`src/project-branch-url.ts`, `src/orchestrator.ts`).
+  - `PIPELINE_ARCHITECT_CLOUD` — si `1`/`true`/`yes`, l’étape architecte en **exécution ticket** (`pipeline next` M/L/XL) tourne en cloud dès la première tentative ; sinon local puis retry cloud si sortie vide (`src/orchestrator/workflows.ts`).
+  - `BRANCH_MISMATCH_POLICY` / `BRANCH_MISMATCH_TRUNK_BRANCHES` — cohérence `branch:` projet vs `last-run/<slug>/run-context.json` ; si la branche projet est une trunk (défaut `main`,`master`,`trunk`), réalignement auto du fichier après merge de PR (`src/project-branch-url.ts`, `src/orchestrator/*`).
 
 ## Agents : clés CLI (`--role`) ⇄ fichier prompt
 
@@ -104,7 +105,9 @@ tsx src/orchestrator.ts --project projects/mon-projet.md --sync-issues
 
 ## Structure
 
-- `src/orchestrator.ts` — Script principal (`fullPipeline`, `runAgent`)
+- `src/orchestrator.ts` — Façade CLI (`dotenv`, `setupRipgrepPath`, `main()`)
+- `src/orchestrator/` — `fullPipeline`, `runAgent`, chargement projet / backlog, garde branche, sync git (`cli.ts`, `workflows.ts`, `agent-runner.ts`, …)
+- `src/orchestrator/session.ts` — Type `OrchestratorSession` + `emptyOrchestratorSession()` ; instance unique créée dans `cli.main()` et passée aux workflows et à `runAgent` (pas de singleton global mutable partagé entre modules).
 - `src/agent-config.ts` — `AGENT_DEFINITIONS`, `promptFile`, résolution des modèles (`createAgentConfig`)
 - `src/models.ts` — Types partagés (`ProjectContext`, backlog, pipeline runs, parsing JSON)
 - `src/backlog.ts` — Parse sortie PM + sélection prochaine issue (`pickNextIssue`)
@@ -159,7 +162,7 @@ Le `fullPipeline` ne couvre pas CI/CD, Docker ni la config d’observabilité pr
   - Ne les modifie que si tu améliores la mécanique d'un rôle (PM, Architect, etc.)
   - Les références spécifiques au projet viennent du fichier `projects/*.md`, pas du prompt.
 - Les fichiers `projects/*.md` peuvent être librement créés et modifiés pour ajouter de nouveaux projets.
-- Tu peux modifier `src/orchestrator.ts` pour ajouter des fonctionnalités (flags, pipelines, etc.).
+- Tu peux modifier `src/orchestrator/cli.ts` ou `src/orchestrator/workflows.ts` pour ajouter des fonctionnalités CLI ou de pipeline (en conservant le flux PM → … ⇄ QA) ; le fichier `src/orchestrator.ts` reste un bootstrap court.
 - Les types et schémas partagés du domaine (backlog, pipeline runs, projet) vivent dans **`src/models.ts`** — évite de dupliquer ces définitions ailleurs.
 - Teste toujours avec `npx tsc --noEmit` avant de proposer un changement TS.
 - **Nouvel agent** : créer `src/prompts/<base>.md`, ajouter une entrée dans **`AGENT_DEFINITIONS`** (`src/agent-config.ts`) avec la même base de nom pour la clé rôle et `promptFile`, et une clé `MODEL_<ROLE>` dans `perRoleEnvKey` si besoin d’override env. La CI vérifie les fichiers avec `npm run verify:prompts`.
