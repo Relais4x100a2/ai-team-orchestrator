@@ -250,6 +250,8 @@ Le pipeline inclut une **boucle de feedback** :
 
 Le rapport de l’agent sécurité doit se terminer par une ligne **`VERDICT SÉCURITÉ: APPROVED|MEDIUM|CRITICAL`** (voir `src/prompts/red-team.md`) pour que le pipeline classe le verdict sans ambiguïté. L’orchestrateur injecte aussi la **branche cible** et les URLs `run-context.json` dans le contexte d’audit.
 
+Pour le **QA**, une ligne **`VERDICT QA: …`** ou **`VERDICT: …`** (en fin de rapport de préférence) permet à l’orchestrateur de distinguer **APPROVE** et **REQUEST_CHANGES** sans ambiguïté. Si plusieurs lignes `VERDICT` / `VERDICT QA` sont présentes, **seule la dernière** est prise en compte (voir `src/prompts/qa-engineer.md` et `detectQAVerdict` dans `src/pipeline-detection.ts`). Les synonymes d’approbation (LGTM, « OK pour merge », etc.) et la valeur machine **`REQUEST_CHANGES`** sont reconnus. Le contexte **branche** et `run-context.json` est injecté comme pour l’audit sécurité.
+
 Le pipeline s'arrête à chaque **checkpoint** pour ta validation
 (via les hooks Cursor).
 

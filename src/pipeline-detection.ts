@@ -1,8 +1,8 @@
 /**
  * Heuristiques minimales pour interpréter les rapports QA / Sécurité dans le pipeline.
  *
- * Détection QA (bilingue) : ligne explicite `VERDICT: …`, bloc « ### … Verdict »,
- * puis motifs EN/FR dans le corps (hors blocs ```).
+ * Détection QA : lignes `VERDICT QA:` / `VERDICT:` (la **dernière** occurrence l’emporte),
+ * puis bloc « ### … Verdict » et motifs EN/FR dans le corps (hors blocs ```).
  *
  * Détection sécurité : ligne prioritaire `VERDICT SÉCURITÉ:` / `SECURITY_VERDICT:`,
  * puis sections « vulnérabilités critiques/moyennes » avec négations explicites
@@ -13,7 +13,9 @@ export type QAVerdict = "APPROVE" | "REQUEST_CHANGES";
 
 export type SecurityVerdict = "APPROVED" | "CRITICAL_ISSUES" | "MEDIUM_ISSUES";
 
-const VERDICT_LINE = /^\s*VERDICT\s*[:：]\s*(.+)$/gim;
+/** `VERDICT: …` ou `VERDICT QA: …` — dernière ligne interprétable gagne. */
+const QA_VERDICT_DIRECTIVE =
+  /^\s*VERDICT(?:\s+QA)?\s*[:：]\s*(.+)$/gim;
 
 /** Ligne machine lisible en fin de rapport sécurité (prioritaire sur les heuristiques). */
 const SECURITY_VERDICT_LINE =
@@ -28,38 +30,65 @@ function normalizeAccents(input: string): string {
   return input.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 }
 
-/** Retourne un verdict uniquement si la ligne dédiée est non ambiguë. */
-function verdictFromDirectiveLine(qaReport: string): QAVerdict | null {
-  VERDICT_LINE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = VERDICT_LINE.exec(qaReport)) !== null) {
-    const token = normalizeAccents(m[1]!.trim().replace(/[`_*]/g, ""));
-    if (token.includes("request_changes") || token.includes("request changes")) {
-      return "REQUEST_CHANGES";
-    }
-    if (token.includes("approve") && !token.includes("comment")) {
-      return "APPROVE";
-    }
-    if (
-      token.includes("changement") &&
-      (token.includes("requis") || token.includes("requise") || token.includes("necessaires"))
-    ) {
-      return "REQUEST_CHANGES";
-    }
-    if (token.includes("demander") && token.includes("changement")) {
-      return "REQUEST_CHANGES";
-    }
-    if (token.includes("demande") && token.includes("changement")) {
-      return "REQUEST_CHANGES";
-    }
-    if (
-      token.startsWith("comment") ||
-      (token.includes("comment") && !token.includes("changement"))
-    ) {
-      return "APPROVE";
-    }
+function mapQAVerdictFromDirectiveValue(raw: string): QAVerdict | null {
+  /** Ne pas retirer `_` : les directives GitHub (`REQUEST_CHANGES`) perdent le séparateur et ne matchent plus. */
+  const token = normalizeAccents(raw.trim().replace(/[`*]/g, "")).replace(/\s+/g, " ");
+  if (!token) return null;
+  if (
+    /\bnon\s+approuve\b/.test(token) ||
+    /\bpas\s+approuve\b/.test(token) ||
+    /\bnot\s+approved\b/.test(token) ||
+    /\brefus\b/.test(token)
+  ) {
+    return null;
   }
+
+  if (token.includes("request_changes") || token.includes("request changes")) {
+    return "REQUEST_CHANGES";
+  }
+  if (
+    token.includes("changement") &&
+    (token.includes("requis") || token.includes("requise") || token.includes("necessaires"))
+  ) {
+    return "REQUEST_CHANGES";
+  }
+  if (token.includes("demander") && token.includes("changement")) {
+    return "REQUEST_CHANGES";
+  }
+  if (token.includes("demande") && token.includes("changement")) {
+    return "REQUEST_CHANGES";
+  }
+
+  if (
+    token.startsWith("comment") ||
+    (token.includes("comment") && !token.includes("changement"))
+  ) {
+    return "APPROVE";
+  }
+
+  if ((/\bapprove\b/.test(token) || /\bapprouve\b/.test(token)) && !token.includes("comment")) {
+    return "APPROVE";
+  }
+  if (token === "lgtm" || /^lgtm\b/.test(token)) {
+    return "APPROVE";
+  }
+  if (/\bok\s+pour\s+merge\b/.test(token) || /\bmerge\s+ok\b/.test(token) || /\bpret\s+a\s+merger\b/.test(token)) {
+    return "APPROVE";
+  }
+
   return null;
+}
+
+/** Dernière directive `VERDICT` / `VERDICT QA` interprétable (prioritaire sur le corps). */
+function verdictFromDirectiveLine(qaReport: string): QAVerdict | null {
+  QA_VERDICT_DIRECTIVE.lastIndex = 0;
+  let last: QAVerdict | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = QA_VERDICT_DIRECTIVE.exec(qaReport)) !== null) {
+    const mapped = mapQAVerdictFromDirectiveValue(m[1]!);
+    if (mapped) last = mapped;
+  }
+  return last;
 }
 
 /** Contenu après un titre Markdown « ### … Verdict » jusqu’au prochain `###` ou fin. */

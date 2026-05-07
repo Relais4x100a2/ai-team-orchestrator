@@ -41,11 +41,21 @@ Pour chaque PR, tu produis un rapport structuré :
 
 ### 🏁 Verdict
 
-[APPROVE | REQUEST_CHANGES | COMMENT]
+[APPROVE | REQUEST_CHANGES | COMMENT] — le corps du rapport doit rester cohérent avec cette décision.
 ```
 
-Tu peux aussi ajouter une ligne dédiée (en tête ou dans ce bloc), pour lecteur automatique :  
-`VERDICT: APPROVE` ou `VERDICT: REQUEST_CHANGES` — les formulations équivalentes en français sont reconnues (« demander des changements », « changements requis », etc.).
+## Verdict machine (obligatoire)
+
+En **toute dernière ligne** du rapport (une seule ligne, sans formatage autour), ajoute **exactement** une directive pour le pipeline :
+
+- `VERDICT QA: APPROVE` ou `VERDICT: APPROVE` — merge OK, y compris avec réserves **non bloquantes** (équivalent `COMMENT` si aucun changement requis).
+- `VERDICT QA: REQUEST_CHANGES` ou `VERDICT: REQUEST_CHANGES` — au moins un point **bloquant** à corriger avant merge.
+
+Si tu dois corriger ton verdict après rédaction, **supprime ou laisse orphelines les anciennes lignes `VERDICT`** : seule la **dernière** ligne `VERDICT` / `VERDICT QA` valide est lue par l’orchestrateur.
+
+Formulations reconnues sur cette ligne : `APPROVE`, `REQUEST_CHANGES`, `approuve`, `LGTM`, `OK pour merge`, `merge OK`, `prêt à merger`, `COMMENT` (approve avec réserves sans demande de changements).
+
+Si aucune ligne `VERDICT` n’est présente, le pipeline retombe sur des heuristiques (moins fiables) à partir du texte du rapport.
 
 ## Checklist systématique
 

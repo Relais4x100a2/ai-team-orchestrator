@@ -51,6 +51,27 @@ describe("detectQAVerdict", () => {
     );
   });
 
+  it("utilise la dernière ligne VERDICT si plusieurs", () => {
+    assert.strictEqual(
+      detectQAVerdict(
+        "VERDICT: APPROVE\n\nBrouillon.\n\nVERDICT: REQUEST_CHANGES\n"
+      ),
+      "REQUEST_CHANGES"
+    );
+    assert.strictEqual(
+      detectQAVerdict(
+        "VERDICT QA: REQUEST_CHANGES\n\nCorrigé.\n\nVERDICT QA: APPROVE\n"
+      ),
+      "APPROVE"
+    );
+  });
+
+  it("reconnaît VERDICT QA: et synonymes d'approbation", () => {
+    assert.strictEqual(detectQAVerdict("Rapport.\nVERDICT QA: approuvé\n"), "APPROVE");
+    assert.strictEqual(detectQAVerdict("Rapport.\nVERDICT: LGTM\n"), "APPROVE");
+    assert.strictEqual(detectQAVerdict("Rapport.\nVERDICT: OK pour merge\n"), "APPROVE");
+  });
+
   it("priorise VERDICT: APPROVE quand aucune contradiction explicite", () => {
     assert.strictEqual(
       detectQAVerdict(

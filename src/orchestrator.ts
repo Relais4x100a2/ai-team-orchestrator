@@ -250,6 +250,38 @@ function buildSecurityImplementationContext(implementationMarkdown: string): str
   ].join("\n");
 }
 
+/** Préfixe branche / PR pour l'agent QA (cohérent avec la cible cloud). */
+function buildQAPipelineContext(innerMarkdown: string): string {
+  const repo =
+    activeProject?.repo?.trim() ||
+    process.env.TARGET_REPO_URL?.trim() ||
+    "—";
+  const branch =
+    activeProject?.branch?.trim() ||
+    process.env.TARGET_BRANCH?.trim() ||
+    "—";
+  let branchUrlLine = "—";
+  let prUrlLine = "—";
+  if (activeProjectSlug) {
+    const ctx = loadLastRunContext(resolveLastRunDir());
+    if (ctx?.latestBranchUrl) branchUrlLine = ctx.latestBranchUrl;
+    if (ctx?.latestPrUrl) prUrlLine = ctx.latestPrUrl;
+  }
+
+  return [
+    "## Cible de review (pipeline)",
+    "",
+    `- **Dépôt** : ${repo}`,
+    `- **Branche Git cloud (\`startingRef\`)** : ${branch}`,
+    `- **Dernière URL branche (last-run/run-context.json)** : ${branchUrlLine}`,
+    `- **Dernière URL PR (last-run/run-context.json)** : ${prUrlLine}`,
+    "",
+    "**Consigne** : revois le code et le diff de **cette branche / cette PR** dans l'environnement cloud Cursor. Si le workspace local diffère, signale-le mais base ton verdict sur l'arbre distant aligné avec la cible ci-dessus.",
+    "",
+    innerMarkdown,
+  ].join("\n");
+}
+
 function extractBranchFromGitHubBranchUrl(url: string | undefined): string | undefined {
   if (!url) return undefined;
   const match = url.match(/\/tree\/([^?#\s]+)/i);
@@ -1146,13 +1178,15 @@ async function fullPipeline(
         "qa",
         qaPrompt,
         {
-          additionalContext: [
-            `## Backlog formalisé\n${specs}`,
-            architectureVision ? `## Vision architecture\n${architectureVision}` : null,
-            reflectionChallenge ? `## Challenge amont\n${reflectionChallenge}` : null,
-            securityReport ? `## Rapport sécurité\n${securityReport}` : null,
-            `## Implémentation\n${implementation}`,
-          ].filter(Boolean).join("\n\n"),
+          additionalContext: buildQAPipelineContext(
+            [
+              `## Backlog formalisé\n${specs}`,
+              architectureVision ? `## Vision architecture\n${architectureVision}` : null,
+              reflectionChallenge ? `## Challenge amont\n${reflectionChallenge}` : null,
+              securityReport ? `## Rapport sécurité\n${securityReport}` : null,
+              `## Implémentation\n${implementation}`,
+            ].filter(Boolean).join("\n\n")
+          ),
           cloud: true,
           frugal,
           issueSize: pipelineIssueSize,
@@ -1160,6 +1194,7 @@ async function fullPipeline(
       );
 
       const verdict = detectQAVerdict(qaReport);
+      console.log(`   📋 Verdict QA (détecté) : ${verdict}`);
       if (verdict === "APPROVE") {
         qaApproved = true;
         console.log("✅ QA approuve — pipeline complet.\n");
