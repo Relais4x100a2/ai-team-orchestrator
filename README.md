@@ -223,6 +223,9 @@ Après chaque exécution d’un agent, sa sortie est automatiquement sauvegardé
 Un index `last-run/<slug>/run-context.json` est aussi maintenu pour tracer les derniers artefacts (fichiers par rôle, URL de branche et URL de PR détectées) afin de faciliter les reprises ciblées.
 
 > Compatibilité : les anciens fichiers `redteam.md` sont migrés automatiquement vers `security.md` s’ils existent encore.
+>
+> Sécurité de reprise : au lancement, l’orchestrateur compare la `branch:` du projet actif avec la dernière branche détectée dans `run-context.json` et affiche un warning en cas d’écart.
+> Par défaut, en cas d’écart, il demande confirmation interactive (`Continuer ? [y/N]`) pour permettre d’interrompre la pipeline.
 
 ```bash
 # Lancer le PM pour générer le brief (sauvegardé dans last-run/monprojet/pm.md)
@@ -267,6 +270,9 @@ AUTO_GIT_SYNC_MODE=safe
 AUTO_GIT_SYNC_ROLES=dev,security,qa
 # ou
 AUTO_GIT_SYNC_ROLES=all
+
+# En cas de mismatch de branche (projet vs run-context) :
+BRANCH_MISMATCH_POLICY=prompt  # prompt|warn|abort
 ```
 
 ### Agents hors pipeline

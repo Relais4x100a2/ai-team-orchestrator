@@ -24,6 +24,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, dirname, basename, isAbsolute, relative } from "path";
 import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
+import { createInterface } from "readline/promises";
 import matter from "gray-matter";
 import {
   createAgentConfig,
@@ -213,6 +214,91 @@ function loadLastRunContext(lastRunDir: string): LastRunContext | null {
   } catch {
     return null;
   }
+}
+
+function extractBranchFromGitHubBranchUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  const match = url.match(/\/tree\/([^?#\s]+)/i);
+  if (!match?.[1]) return undefined;
+  return decodeURIComponent(match[1]);
+}
+
+function resolveBranchMismatchPolicy(): "prompt" | "warn" | "abort" {
+  const raw = process.env.BRANCH_MISMATCH_POLICY?.trim().toLowerCase();
+  if (raw === "warn" || raw === "abort" || raw === "prompt") return raw;
+  return "prompt";
+}
+
+function getProjectBranchMismatchContext():
+  | {
+      activeBranch: string;
+      expectedBranch: string;
+      sourceUrl: string;
+    }
+  | null {
+  if (!activeProjectSlug || !activeProject) return null;
+  const lastRunDir = resolveLastRunDir();
+  const context = loadLastRunContext(lastRunDir);
+  if (!context?.latestBranchUrl) return null;
+
+  const expectedBranch = extractBranchFromGitHubBranchUrl(context.latestBranchUrl);
+  if (!expectedBranch) return null;
+  const activeBranch = activeProject.branch?.trim();
+  if (!activeBranch || activeBranch === expectedBranch) return null;
+
+  return {
+    activeBranch,
+    expectedBranch,
+    sourceUrl: context.latestBranchUrl,
+  };
+}
+
+async function enforceProjectBranchGuard(): Promise<void> {
+  const mismatch = getProjectBranchMismatchContext();
+  if (!mismatch) return;
+
+  const details =
+    "\n⚠️  Branch mismatch détecté entre projet actif et dernier run context.\n" +
+    `   - Branche projet active : ${mismatch.activeBranch}\n` +
+    `   - Branche attendue (last-run): ${mismatch.expectedBranch}\n` +
+    `   - Source: ${mismatch.sourceUrl}\n`;
+
+  const policy = resolveBranchMismatchPolicy();
+  if (policy === "abort") {
+    console.error(
+      `${details}` +
+        "🛑 Exécution interrompue (BRANCH_MISMATCH_POLICY=abort).\n" +
+        "   Aligne `branch:` dans projects/<projet>.md puis relance."
+    );
+    process.exit(1);
+  }
+  if (policy === "warn") {
+    console.warn(
+      `${details}` +
+        "   ℹ️  Continuer malgré l'écart (BRANCH_MISMATCH_POLICY=warn)."
+    );
+    return;
+  }
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.warn(
+      `${details}` +
+        "   ⚠️  Terminal non interactif : poursuite par défaut.\n" +
+        "   Astuce: BRANCH_MISMATCH_POLICY=abort pour bloquer automatiquement."
+    );
+    return;
+  }
+
+  console.warn(details + "   Choix requis avant de continuer.");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answer = (await rl.question("Continuer quand même ? [y/N] ")).trim().toLowerCase();
+  rl.close();
+  if (answer !== "y" && answer !== "yes" && answer !== "o" && answer !== "oui") {
+    console.error("🛑 Exécution interrompue par l'utilisateur (mismatch de branche).");
+    process.exit(1);
+  }
+
+  console.log("   ✅ Confirmation utilisateur : poursuite malgré mismatch de branche.");
 }
 
 function saveLastRunContext(
@@ -1201,6 +1287,8 @@ async function main() {
     briefFromFile = readFileSync(briefFilePath, "utf-8").trim();
     console.log(`📄 Brief chargé depuis : ${briefDisplay}`);
   }
+
+  await enforceProjectBranchGuard();
 
   // --resume-from : reprendre le pipeline à une étape donnée
   let resumeFrom: PipelineStep | undefined;
