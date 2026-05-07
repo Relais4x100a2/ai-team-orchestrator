@@ -13,7 +13,7 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
 
 - TypeScript (Node.js) pour l'orchestrateur
 - Cursor SDK (@cursor/sdk) pour les agents
-- Modèles : `MODEL_STRONG` / `MODEL_FAST` et `MODEL_<ROLE>` dans `.env`, résolus dans `resolveRunModel()` (`src/agent-config.ts`) — utilisé par `runAgent` et par `createAgentConfig()` (invocations sans taille d'issue). Sur `pipeline next`, la **taille d'issue** du backlog (`S`/`M`/`L`/`XL`) applique une grille coût/qualité pour les rôles pipeline (détail dans `agent-config.ts`) sans changer le point d'entrée du pipeline (PM par défaut).
+- Modèles : `MODEL_STRONG` / `MODEL_FAST` et `MODEL_<ROLE>` dans `.env`, résolus dans `resolveRunModel()` (`src/agent-config.ts`) — utilisé par `runAgent` et par `createAgentConfig()` (invocations sans taille d'issue). Sur `pipeline next`, la **taille d'issue** du backlog (`S`/`M`/`L`/`XL`) applique une grille coût/qualité pour les rôles pipeline et détermine le point d'entrée d'exécution (`dev` pour `S`, `architect` pour `M/L/XL`).
 - Projets **cibles** multiples (configuration via `projects/*.md`)
 - **Variables `.env` utiles**
   - `CURSOR_API_KEY` — obligatoire pour lancer les agents
@@ -58,8 +58,8 @@ npm run start        # Aide interactive + liste des rôles (--role)
 # Pipeline full : PM → Architect → Red Team Réflexion → Dev ⇄ Sécurité ⇄ QA
 npm run pipeline     # équivalent à --pipeline full
 npm run pipeline:next # prochaine issue du backlog.json
-npm run pipeline backlog forward "Meta-vision"
-npm run pipeline backlog backward "Feedback"
+npm run project -- monprojet --pipeline backlog forward "Meta-vision"
+npm run project -- monprojet --pipeline backlog backward "Feedback"
 
 npm run pm:backlog   # PM en cloud → enrichit backlog.json
 npm run backlog      # Synthèse du backlog

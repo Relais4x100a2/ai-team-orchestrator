@@ -129,7 +129,7 @@ describe("resolveRunModel", () => {
   it("frugal force composer-2 même avec issueSize XL", () => {
     const arch = resolveRunModel("architect", { issueSize: "XL", frugal: true, env: {} });
     assert.strictEqual(arch.id, "composer-2");
-    assert.ok(arch.params?.some(p => p.id === "fast" && p.value === "true"));
+    assert.ok(arch.params?.some(p => p.id === "fast" && p.value === "false"));
   });
 });
 

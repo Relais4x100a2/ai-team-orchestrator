@@ -500,6 +500,7 @@ async function pipelineNext() {
       issueSize: issue.size,
       resumeFrom: executionStart,
       mode: "execution",
+      startReason: `routing pipeline next (taille ${issue.size})`,
     });
 
     // Mark done (re-read backlog to avoid conflicts)
@@ -638,11 +639,13 @@ async function fullPipeline(
     pipelineRunId?: string;
     issueSize?: IssueSize;
     mode?: "full" | "execution";
+    startReason?: string;
   } = {}
 ) {
   // Mode full: démarre en réflexion (PM). Mode execution: démarre depuis l'étape donnée ou dev.
   const isExecutionOnly = opts.mode === "execution";
-  const resumeFrom = opts.resumeFrom ?? (isExecutionOnly ? "dev" : "pm");
+  const defaultStart = isExecutionOnly ? "dev" : "pm";
+  const resumeFrom = opts.resumeFrom ?? defaultStart;
   const startIdx = PIPELINE_STEPS.indexOf(resumeFrom);
   const runId = opts.pipelineRunId ?? newPipelineRunId();
   const startedAt = new Date().toISOString();
@@ -667,6 +670,14 @@ async function fullPipeline(
     brief.length > 50_000 ? `${brief.slice(0, 50_000)}\n\n[… tronqué pour pipeline-runs.json …]` : brief;
 
   const pipelineIssueSize = opts.issueSize;
+  const stepLabel: Record<PipelineStep, string> = {
+    pm: "PM",
+    architect: "Architect",
+    redteam_reflection: "Red Team Réflexion",
+    dev: "Dev",
+    security: "Sécurité",
+    qa: "QA",
+  };
 
   try {
     console.log("═".repeat(60));
@@ -678,10 +689,16 @@ async function fullPipeline(
     if (pipelineIssueSize) {
       console.log(`   📐 Taille issue (grille modèles) : ${pipelineIssueSize}`);
     }
-    if (resumeFrom !== "pm") {
-      const reason = "--resume-from explicite";
+    if (resumeFrom !== defaultStart) {
+      const reason = opts.startReason ?? (opts.resumeFrom ? "--resume-from explicite" : "routing interne");
       console.log(`   ⏩ Démarrage depuis : ${resumeFrom.toUpperCase()} (${reason})`);
     }
+    const plannedSteps = PIPELINE_STEPS
+      .filter((step) => stepLabel[step] && PIPELINE_STEPS.indexOf(step) >= startIdx)
+      .filter((step) => !isExecutionOnly || ["architect", "dev", "security", "qa"].includes(step))
+      .map((step) => stepLabel[step])
+      .join(" -> ");
+    console.log(`   🗺️  Plan d'exécution : ${plannedSteps}`);
     console.log("═".repeat(60));
 
     // Quand on reprend depuis une étape intermédiaire, le brief joue le rôle
@@ -703,8 +720,6 @@ async function fullPipeline(
       }
     } else if (!isExecutionOnly) {
       console.log("\n📋 ÉTAPE 1/6 — Product Manager : ⏭  ignoré (--resume-from)");
-    } else {
-      console.log("\n📋 ÉTAPE 1/6 — Product Manager : ⏭  ignoré (mode execution)");
     }
 
     // ── Étape 2 : Architect (cadrage architecture amont, ou garde-fou execution selon taille) ──
@@ -717,7 +732,7 @@ async function fullPipeline(
           : "Établis la vision architecture cible, les contraintes, une alternative crédible et les risques principaux pour les items Must/Should.",
         { additionalContext: specs, frugal, issueSize: pipelineIssueSize }
       );
-    } else {
+    } else if (!isExecutionOnly) {
       console.log("\n🏛️  ÉTAPE 2/6 — Data Architect : ⏭  ignoré (--resume-from)");
     }
 
@@ -735,8 +750,6 @@ async function fullPipeline(
       );
     } else if (!isExecutionOnly) {
       console.log("\n🧠 ÉTAPE 3/6 — Red Team Réflexion : ⏭  ignoré (--resume-from)");
-    } else {
-      console.log("\n🧠 ÉTAPE 3/6 — Red Team Réflexion : ⏭  ignoré (mode execution)");
     }
 
     // ── Exécution : Dev -> Sécurité -> QA ──
@@ -917,12 +930,21 @@ async function fullPipeline(
     console.log("\n" + "═".repeat(60));
     console.log("📊 PIPELINE TERMINÉ — Résumé");
     console.log("═".repeat(60));
-    console.log(`1. Backlog PM                : ${skipped("pm") ? "⏭  ignoré" : "✅ formalisé"}`);
-    console.log(`2. Vision architecture       : ${skipped("architect") ? "⏭  ignoré" : "✅ cadrée"}`);
-    console.log(`3. Red Team réflexion        : ${skipped("redteam_reflection") ? "⏭  ignoré" : "✅ challenge produit/archi"}`);
-    console.log(`4. Implémentation            : ${skipped("dev") ? "⏭  ignoré" : "✅ PR mise à jour"}`);
-    console.log(`5. Sécurité                  : ${skipped("security") ? "⏭  ignoré" : `✅ complétée (${securityIteration} itération${securityIteration > 1 ? "s" : ""})`}`);
-    console.log(`6. Review QA                 : ${skipped("qa") ? "⏭  ignoré" : `✅ approuvée (${qaIteration} itération${qaIteration > 1 ? "s" : ""})`}`);
+    if (isExecutionOnly) {
+      if (!skipped("architect")) {
+        console.log("1. Cadrage architecture      : ✅ effectué");
+      }
+      console.log("2. Implémentation            : ✅ PR mise à jour");
+      console.log(`3. Sécurité                  : ✅ complétée (${securityIteration} itération${securityIteration > 1 ? "s" : ""})`);
+      console.log(`4. Review QA                 : ✅ approuvée (${qaIteration} itération${qaIteration > 1 ? "s" : ""})`);
+    } else {
+      console.log(`1. Backlog PM                : ${skipped("pm") ? "⏭  ignoré" : "✅ formalisé"}`);
+      console.log(`2. Vision architecture       : ${skipped("architect") ? "⏭  ignoré" : "✅ cadrée"}`);
+      console.log(`3. Red Team réflexion        : ${skipped("redteam_reflection") ? "⏭  ignoré" : "✅ challenge produit/archi"}`);
+      console.log(`4. Implémentation            : ${skipped("dev") ? "⏭  ignoré" : "✅ PR mise à jour"}`);
+      console.log(`5. Sécurité                  : ${skipped("security") ? "⏭  ignoré" : `✅ complétée (${securityIteration} itération${securityIteration > 1 ? "s" : ""})`}`);
+      console.log(`6. Review QA                 : ${skipped("qa") ? "⏭  ignoré" : `✅ approuvée (${qaIteration} itération${qaIteration > 1 ? "s" : ""})`}`);
+    }
     console.log("\n👉 Va sur GitHub pour review final et merger la PR.");
   } catch (e) {
     runStatus = "failed";

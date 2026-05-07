@@ -20,7 +20,8 @@ export interface ModelSelection {
 /** Modèle économique utilisé en mode frugal (seuil de dépenses atteint). */
 export const FRUGAL_MODEL: ModelSelection = {
   id: "composer-2",
-  params: [{ id: "fast", value: "true" }],
+  // Pricing Cursor: Composer 2 (fast:false) est moins cher au token que fast:true.
+  params: [{ id: "fast", value: "false" }],
 };
 
 // ---------------------------------------------------------------------------
@@ -93,7 +94,7 @@ const AGENT_DEFINITIONS = {
     promptFile: "fullstack-dev",
     description: "Développeur Full-Stack — implémentation",
     tier: "fast" as const,
-    // Composer 2 est le modèle natif Cursor, optimisé pour l'écriture de code
+    // Mode vitesse pour garder une bonne réactivité en implémentation.
     defaultModel: {
       id: "composer-2",
       params: [{ id: "fast", value: "true" }],
@@ -103,7 +104,7 @@ const AGENT_DEFINITIONS = {
     promptFile: "qa-engineer",
     description: "QA Engineer — review & tests",
     tier: "fast" as const,
-    // Tourne jusqu'à 3× en boucle — composer-2 est suffisant pour la review de code
+    // Mode vitesse pour limiter la latence des boucles QA.
     defaultModel: {
       id: "composer-2",
       params: [{ id: "fast", value: "true" }],
