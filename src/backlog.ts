@@ -37,6 +37,46 @@ export type ParsedIssueDraft = Omit<
   "id" | "createdAt" | "updatedAt" | "completedAt" | "pipelineRun"
 >;
 
+/** Bloc plausible issue PM : titre User Story (# / ## / **), ou corps type story avec priorité+titre. */
+function blockLooksLikePmIssue(block: string): boolean {
+  const b = block.trim();
+  if (!b) return false;
+  if (/🎯\s*User\s+Story/i.test(b)) return true;
+  if (/^#{1,3}[^\n]*User\s+Stor(?:y|ies)\b/im.test(b)) return true;
+  if (/\*\*User\s+Story\*\*/i.test(b)) return true;
+  const hasPersona =
+    /\bEn\s+tant\s+que\b/i.test(b) || /\bas\s+a\b/i.test(b) || /\bje\s+veux\b/i.test(b);
+  if (hasPersona && /\b(MUST|SHOULD|COULD|WONT)\b/i.test(b) && /\bTaille\b/i.test(b)) return true;
+  return false;
+}
+
+function extractPriority(block: string): IssuePriority {
+  const patterns = [
+    /## [🏷️\s]*Priorit[ée][^\n]*\n+\[?\s*(MUST|SHOULD|COULD|WONT)\s*\]?/im,
+    /##[^\n]*Priorit[ée][^\n]*\s*\n+\[?\s*(MUST|SHOULD|COULD|WONT)\s*\]?/im,
+    /\*\*Priorit[ée]\*\*\s*\n+\[?\s*(MUST|SHOULD|COULD|WONT)\s*\]?/im,
+  ];
+  for (const p of patterns) {
+    const m = block.match(p);
+    if (m?.[1]) return m[1].toUpperCase() as IssuePriority;
+  }
+  return "SHOULD";
+}
+
+function extractSize(block: string): IssueSize {
+  const patterns = [
+    /## [📏\s]*Taille[^\n]*\n+\[?\s*(S|M|L|XL)\s*\]?/im,
+    /##[^\n]*Taille[^\n]*\s*\n+\[?\s*(S|M|L|XL)\s*\]?/im,
+    /\*\*Taille[^\n]*\*\*\s*\n+\[?\s*(S|M|L|XL)\s*\]?/im,
+    /\*\*(?:Estimated\s+)?[Ss]ize\*\*\s*\n+\[?\s*(S|M|L|XL)\s*\]?/im,
+  ];
+  for (const p of patterns) {
+    const m = block.match(p);
+    if (m?.[1]) return m[1].toUpperCase() as IssueSize;
+  }
+  return "M";
+}
+
 /**
  * Extrait depuis la sortie texte du PM les user stories exploitables pour backlog.json.
  *
@@ -49,7 +89,9 @@ export function parsePMOutput(pmOutput: string): ParsedIssueDraft[] {
   const issues: ParsedIssueDraft[] = [];
   const blocks = pmOutput
     .split(/\n(?:---+|\*\*\*+)\n/)
-    .filter(b => b.includes("🎯 User Story") || b.includes("User Story"));
+    .map(b => b.trim())
+    .filter(Boolean)
+    .filter(blockLooksLikePmIssue);
 
   for (const block of blocks) {
     const h1Match = block.match(/^#\s+(.+?)$/m);
@@ -60,16 +102,20 @@ export function parsePMOutput(pmOutput: string): ParsedIssueDraft[] {
       title = userStoryMatch ? userStoryMatch[1].trim().split("\n")[0] : null;
     }
 
+    if (!title) {
+      const enTantMatch = block.match(/\bEn\s+tant\s+que\s+[^,\n]+,\s*je\s+veux\s+(.+?)(?:\.|$)/is);
+      title = enTantMatch ? enTantMatch[1].trim().split("\n")[0] : null;
+    }
+
+    if (!title) {
+      const asAMatch = block.match(/\bas\s+a\s+[^,\n]+,\s*i\s+(?:want|need)\s+(.+?)(?:\.|,|$)/is);
+      title = asAMatch ? asAMatch[1].trim().split("\n")[0] : null;
+    }
+
     title = title || "Issue sans titre";
 
-    const priorityMatch = block.match(
-      /## [🏷️\s]*Priorit[ée][^\n]*\n+\[?(MUST|SHOULD|COULD|WONT)\]?/i
-    );
-    const priority = (priorityMatch?.[1]?.toUpperCase() ??
-      "SHOULD") as IssuePriority;
-
-    const sizeMatch = block.match(/## [📏\s]*Taille[^\n]*\n+\[?(S|M|L|XL)\]?/i);
-    const size = (sizeMatch?.[1]?.toUpperCase() ?? "M") as IssueSize;
+    const priority = extractPriority(block);
+    const size = extractSize(block);
 
     issues.push({
       title,

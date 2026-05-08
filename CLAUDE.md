@@ -62,6 +62,7 @@ npm run pipeline     # équivalent à --pipeline full
 npm run pipeline:next # prochaine issue du backlog.json
 npm run project -- monprojet --pipeline backlog forward "Meta-vision"
 npm run project -- monprojet --pipeline backlog backward "Feedback"
+# (--pipeline backlog forward|backward : PM + architecte + red team réflexion en **cloud** sur `repo:` ; sortie vide ⇒ erreur après tentatives automatiques)
 
 npm run pm:backlog   # PM en cloud → enrichit backlog.json
 npm run backlog      # Synthèse du backlog

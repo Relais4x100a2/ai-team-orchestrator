@@ -240,7 +240,9 @@ npm run project -- monprojet --pipeline full \
   --brief-file last-run/monprojet/architect.md --resume-from dev
 ```
 
-**Mode d’exécution :** les étapes **Product Manager** et **Data Architect** tournent en **local** dans le répertoire défini par `local_path` du fichier projet (ou le cwd de l’orchestrateur si absent). À partir du **Développeur**, le pipeline utilise **cloud** Cursor contre le repo cible défini par `repo:` dans le fichier projet.
+**Mode d’exécution :** dans le pipeline **`full`** (et `pipeline next`), les étapes **Product Manager** et **Data Architect** tournent en **local** dans le répertoire défini par `local_path` du fichier projet (ou le cwd de l’orchestrateur si absent). À partir du **Développeur**, le pipeline utilise **cloud** Cursor contre le repo cible défini par `repo:` dans le fichier projet. Le sous-pipeline **`--pipeline backlog` forward / backward** en revanche exécute **PM, architecte et réflexion red team en cloud** contre ce dépôt (`repo:` obligatoire comme pour le cloud en général).
+
+**Sortie agent :** pour PM, architecte et red team réflexion, une **sortie texte vide** après tentatives (second essai local ou cloud, puis secours cloud selon le cas) est traitée comme une **erreur explicite**. Si le texte est présent mais que le parse du backlog échoue, des fichiers `last-run/<slug>/pm-parse-failure.*.md` sont écrits pour inspection.
 
 Le pipeline inclut une **boucle de feedback** :
 - Sécurité (avant QA) approuve → passage à QA

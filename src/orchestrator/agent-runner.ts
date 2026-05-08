@@ -22,6 +22,19 @@ import type { OrchestratorSession } from "./session.js";
 
 export const AGENT_CONFIG = createAgentConfig();
 
+/** Rôles pour lesquels une sortie vide est considérée comme une erreur après tentatives et secours cloud. */
+const ROLES_REQUIRING_NON_EMPTY_OUTPUT = new Set<AgentRole>(["pm", "architect", "redteam_reflection"]);
+
+function normalizeAgentWaitOutcome(raw: unknown): string {
+  if (raw == null) return "";
+  if (typeof raw === "string") return raw.trim();
+  if (typeof raw === "object" && raw !== null && "result" in raw) {
+    const r = (raw as { result?: unknown }).result;
+    return typeof r === "string" ? r.trim() : "";
+  }
+  return "";
+}
+
 export async function runAgent(
   session: OrchestratorSession,
   role: AgentRole,
@@ -63,83 +76,124 @@ export async function runAgent(
 
   requireRepoUrlForCloud(session, options.cloud);
 
-  const agentOptions: Parameters<typeof Agent.create>[0] = {
-    apiKey: process.env.CURSOR_API_KEY!,
-    model,
-  };
-
   const repoUrl = resolveRepoUrl(session);
   const branchRef = session.activeProject?.branch?.trim() || process.env.TARGET_BRANCH;
 
-  if (options.cloud) {
-    Object.assign(agentOptions, {
-      cloud: {
-        repos: [
-          {
-            url: repoUrl!,
-            ...(branchRef && { startingRef: branchRef }),
-          },
-        ],
-        autoCreatePR: options.autoCreatePR ?? false,
-      },
-    });
-  } else {
-    const localCwd = session.activeProject?.localPath ?? process.cwd();
-    Object.assign(agentOptions, {
-      local: { cwd: localCwd },
-    });
-    if (session.activeProject?.localPath) {
-      console.log(`   Répertoire local : ${session.activeProject.localPath}`);
-    }
+  if (!options.cloud && session.activeProject?.localPath) {
+    console.log(`   Répertoire local : ${session.activeProject.localPath}`);
   }
 
   const roleAndTask = `${prompt}\n\n---\n\n${fullTask}`;
   const taskWithSystemPrompt = projectSection ? `${projectSection}\n\n---\n\n${roleAndTask}` : roleAndTask;
 
-  const runOnce = async () => {
-    let agent: Awaited<ReturnType<typeof Agent.create>> | null = null;
-    try {
-      agent = await Agent.create(agentOptions);
-    } catch (e) {
-      throw new Error(`Impossible de créer l'agent ${role} (${model.id}) : ${formatErrorMessage(e)}`, { cause: e });
+  const buildCreateOptionsForMode = (useCloud: boolean): Parameters<typeof Agent.create>[0] => {
+    const base: Parameters<typeof Agent.create>[0] = {
+      apiKey: process.env.CURSOR_API_KEY!,
+      model,
+    };
+    if (useCloud) {
+      Object.assign(base, {
+        cloud: {
+          repos: [
+            {
+              url: repoUrl!,
+              ...(branchRef && { startingRef: branchRef }),
+            },
+          ],
+          autoCreatePR: options.autoCreatePR ?? false,
+        },
+      });
+    } else {
+      const localCwd = session.activeProject?.localPath ?? process.cwd();
+      Object.assign(base, { local: { cwd: localCwd } });
     }
-
-    let run;
-    try {
-      run = await agent.send(taskWithSystemPrompt);
-    } catch (e) {
-      throw new Error(`Échec de l'envoi de la tâche à l'agent ${role} : ${formatErrorMessage(e)}`, { cause: e });
-    }
-
-    try {
-      return await run.wait();
-    } catch (e) {
-      throw new Error(`L'agent ${role} n'a pas terminé correctement : ${formatErrorMessage(e)}`, { cause: e });
-    } finally {
-      try {
-        const disposable = agent as { [Symbol.asyncDispose]?: () => Promise<void> } | null;
-        const asyncDispose = disposable?.[Symbol.asyncDispose];
-        if (typeof asyncDispose === "function") {
-          await asyncDispose.call(disposable);
-        } else if (agent && "close" in agent && typeof agent.close === "function") {
-          agent.close();
-        }
-      } catch (disposeErr) {
-        console.warn(`⚠️  Nettoyage agent (${role}) incomplet : ${formatErrorMessage(disposeErr)}`);
-      }
-    }
+    return base;
   };
 
-  const runResult = options.cloud
-    ? await runCloudAgentWithPolicy(runOnce, process.env, `⚠️  cloud-policy (${role}) :`)
-    : await runOnce();
+  const executeRound = async (useCloud: boolean, label: string): Promise<string> => {
+    if (useCloud) {
+      requireRepoUrlForCloud(session, true);
+    }
+    const createOpts = buildCreateOptionsForMode(useCloud);
+    console.log(`   🔄 ${label} (${useCloud ? "cloud" : "local"})`);
 
-  if (runResult.result) {
-    console.log(runResult.result);
+    const runOnce = async (): Promise<unknown> => {
+      let agent: Awaited<ReturnType<typeof Agent.create>> | null = null;
+      try {
+        agent = await Agent.create(createOpts);
+      } catch (e) {
+        throw new Error(`Impossible de créer l'agent ${role} (${model.id}) : ${formatErrorMessage(e)}`, {
+          cause: e,
+        });
+      }
+
+      let run;
+      try {
+        run = await agent!.send(taskWithSystemPrompt);
+      } catch (e) {
+        throw new Error(`Échec de l'envoi de la tâche à l'agent ${role} : ${formatErrorMessage(e)}`, { cause: e });
+      }
+
+      try {
+        return await run!.wait();
+      } catch (e) {
+        throw new Error(`L'agent ${role} n'a pas terminé correctement : ${formatErrorMessage(e)}`, { cause: e });
+      } finally {
+        try {
+          const disposable = agent as { [Symbol.asyncDispose]?: () => Promise<void> } | null;
+          const asyncDispose = disposable?.[Symbol.asyncDispose];
+          if (typeof asyncDispose === "function") {
+            await asyncDispose.call(disposable);
+          } else if (agent && "close" in agent && typeof agent.close === "function") {
+            agent.close();
+          }
+        } catch (disposeErr) {
+          console.warn(`⚠️  Nettoyage agent (${role}) incomplet : ${formatErrorMessage(disposeErr)}`);
+        }
+      }
+    };
+
+    const rawOutcome = useCloud
+      ? await runCloudAgentWithPolicy(runOnce, process.env, `⚠️  cloud-policy (${role}) :`)
+      : await runOnce();
+    const text = normalizeAgentWaitOutcome(rawOutcome);
+    console.log(`   📊 Sortie (${label}) : ${text.length} caractère(s)`);
+    return text;
+  };
+
+  const primaryCloud = Boolean(options.cloud);
+  const mustBeNonEmpty = ROLES_REQUIRING_NON_EMPTY_OUTPUT.has(role);
+  let result = await executeRound(primaryCloud, "Tentative principale");
+
+  if (mustBeNonEmpty && !result) {
+    if (!primaryCloud) {
+      console.warn("⚠️  Sortie vide — nouvelle exécution locale");
+      result = await executeRound(false, "Nouvelle tentative (local)");
+    }
+  }
+
+  if (mustBeNonEmpty && !result && !primaryCloud && resolveRepoUrl(session)) {
+    console.warn("⚠️  Sortie vide encore — tentative de secours en cloud");
+    result = await executeRound(true, "Secours cloud");
+  }
+
+  if (mustBeNonEmpty && !result && primaryCloud) {
+    console.warn("⚠️  Sortie vide — nouvelle exécution cloud");
+    result = await executeRound(true, "Nouvelle tentative (cloud)");
+  }
+
+  if (mustBeNonEmpty && !result) {
+    throw new Error(
+      `L'agent ${role} (${model.id}) s'est terminé sans texte exploitable après les tentatives automatiques.` +
+        " Vérifie CURSOR_API_KEY, connexion Cursor, permissions du projet et journaux Agents.",
+    );
+  }
+
+  if (result) {
+    console.log(result);
   } else {
     console.log("(Pas de sortie retournée par l'agent)");
   }
-  const result = runResult.result || "";
 
   if (result) {
     if (!session.activeProjectSlug) {

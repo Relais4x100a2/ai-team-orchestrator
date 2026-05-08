@@ -1,4 +1,4 @@
-import { writeFileSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import type { IssueSize } from "../backlog.js";
 import { generateIssueId, parsePMOutput } from "../backlog.js";
@@ -6,7 +6,40 @@ import { checkFrugalMode } from "../spend-guard.js";
 import { previewText, REPO_ROOT } from "./paths-and-env.js";
 import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
 import { runAgent } from "./agent-runner.js";
+import { migrateLegacySecurityFile, resolveLastRunDir } from "./run-context.js";
 import type { OrchestratorSession } from "./session.js";
+
+/** Sauvegarde la sortie PM quand parsePMOutput ne peut pas être appliqué (diagnostic hors backlog.json). */
+function savePmParseFailureArtifacts(
+  session: OrchestratorSession,
+  pmOutput: string,
+  extras?: { architecture?: string; reflection?: string },
+): void {
+  try {
+    if (session.activeProjectSlug) {
+      const dir = resolveLastRunDir(session);
+      mkdirSync(dir, { recursive: true });
+      migrateLegacySecurityFile(dir);
+      const basePath = resolve(dir, "pm-parse-failure");
+      writeFileSync(`${basePath}.raw.md`, pmOutput, "utf-8");
+      if (extras?.architecture?.trim()) {
+        writeFileSync(`${basePath}.architecture.md`, extras.architecture, "utf-8");
+      }
+      if (extras?.reflection?.trim()) {
+        writeFileSync(`${basePath}.reflection.md`, extras.reflection, "utf-8");
+      }
+      console.log(
+        `   📝 Sortie brute (parse PM) : last-run/${session.activeProjectSlug}/pm-parse-failure.*.md`,
+      );
+    } else {
+      const fallback = "backlog-raw.md";
+      writeFileSync(resolve(REPO_ROOT, fallback), pmOutput, "utf-8");
+      console.log(`   📝 Sortie brute (parse PM) : ${fallback} (racine orchestrateur)`);
+    }
+  } catch (e) {
+    console.warn(`   ⚠️  Échec sauvegarde diagnostic parse PM : ${(e as Error).message}`);
+  }
+}
 
 export async function runArchitectForBacklogReflection(
   session: OrchestratorSession,
@@ -18,7 +51,7 @@ export async function runArchitectForBacklogReflection(
     session,
     "architect",
     "Produit la vision cible pour les items Must/Should du backlog (cible, hypothèses/contraintes, alternative crédible, risques principaux).",
-    { additionalContext: specs, frugal, issueSize },
+    { additionalContext: specs, frugal, issueSize, cloud: true },
   );
 }
 
@@ -43,8 +76,7 @@ export async function pmBacklogWorkflow(session: OrchestratorSession): Promise<v
 
   if (parsedIssues.length === 0) {
     console.log("⚠️  Aucune issue parsée depuis la sortie du PM. Vérifie le format de sortie.");
-    console.log("   Sortie brute sauvegardée dans backlog-raw.md pour inspection.\n");
-    writeFileSync(resolve(REPO_ROOT, "backlog-raw.md"), pmOutput, "utf-8");
+    savePmParseFailureArtifacts(session, pmOutput);
     return;
   }
 
@@ -89,6 +121,7 @@ export async function pipelineBacklogReflection(
   const specs = await runAgent(session, "pm", pmTask, {
     additionalContext: brief,
     frugal,
+    cloud: true,
   });
 
   const architecture = await runArchitectForBacklogReflection(session, specs, frugal);
@@ -97,12 +130,20 @@ export async function pipelineBacklogReflection(
     session,
     "redteam_reflection",
     "Challenge la cohérence produit/architecture et propose les ajustements backlog nécessaires.",
-    { additionalContext: `## Backlog\n${specs}\n\n## Vision architecture\n${architecture}`, frugal },
+    {
+      additionalContext: `## Backlog\n${specs}\n\n## Vision architecture\n${architecture}`,
+      frugal,
+      cloud: true,
+    },
   );
 
   const parsedIssues = parsePMOutput(specs);
   if (parsedIssues.length === 0) {
     console.log("⚠️  Aucune issue parsée depuis la sortie PM — backlog non modifié.");
+    savePmParseFailureArtifacts(session, specs, {
+      architecture,
+      reflection,
+    });
     return;
   }
 

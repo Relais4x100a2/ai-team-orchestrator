@@ -68,6 +68,42 @@ XL
   it("retourne tableau vide si aucun bloc User Story", () => {
     assert.deepStrictEqual(parsePMOutput("Pas d'issue ici."), []);
   });
+
+  it("accepte une section « User Story » sans emoji sous ##", () => {
+    const pm = `
+## User Story
+
+En tant qu’utilisateur, je veux filtrer par lieu afin de lister les fiches concernées.
+
+## Priorité
+
+MUST
+
+## Taille estimée
+
+S
+`;
+    const issues = parsePMOutput(pm);
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0]!.priority, "MUST");
+    assert.strictEqual(issues[0]!.size, "S");
+    assert.ok(issues[0]!.description.includes("filtrer par lieu"));
+  });
+
+  it("accepte priorité/taille au format **gras**", () => {
+    const pm = `## 🎯 User Story
+As a genealogist I want CSV export.
+
+**Priorité**
+SHOULD
+
+**Taille estimée**
+L`;
+    const issues = parsePMOutput(pm);
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0]!.priority, "SHOULD");
+    assert.strictEqual(issues[0]!.size, "L");
+  });
 });
 
 describe("generateIssueId", () => {
