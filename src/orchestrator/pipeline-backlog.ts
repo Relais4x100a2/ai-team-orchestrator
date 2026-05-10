@@ -137,10 +137,18 @@ export async function pipelineBacklogReflection(
     },
   );
 
-  const parsedIssues = parsePMOutput(specs);
+  const pmSynthesisTask =
+    "À partir de la vision PM initiale, des contraintes architecture et des défis red team, produis la version FINALE et révisée du backlog. Intègre les ajustements de priorité, taille et description proposés. Utilise EXACTEMENT le même format (## 🎯 User Story, ## 🏷️ Priorité, ## 📏 Taille estimée, etc.) séparé par ---.";
+  const specsFinal = await runAgent(session, "pm", pmSynthesisTask, {
+    additionalContext: `## Backlog initial (PM)\n${specs}\n\n## Vision architecture\n${architecture}\n\n## Défis et ajustements Red Team\n${reflection}`,
+    frugal,
+    cloud: resolveCloudMode(session, "pm"),
+  });
+
+  const parsedIssues = parsePMOutput(specsFinal);
   if (parsedIssues.length === 0) {
-    console.log("⚠️  Aucune issue parsée depuis la sortie PM — backlog non modifié.");
-    savePmParseFailureArtifacts(session, specs, {
+    console.log("⚠️  Aucune issue parsée depuis la sortie PM (synthèse finale) — backlog non modifié.");
+    savePmParseFailureArtifacts(session, specsFinal, {
       architecture,
       reflection,
     });
