@@ -25,6 +25,20 @@ export const AGENT_CONFIG = createAgentConfig();
 /** Rôles pour lesquels une sortie vide est considérée comme une erreur après tentatives et secours cloud. */
 const ROLES_REQUIRING_NON_EMPTY_OUTPUT = new Set<AgentRole>(["pm", "architect", "redteam_reflection"]);
 
+/** Rôles qui nécessitent impérativement le cloud (accès PR GitHub, push de code). */
+const ROLES_REQUIRING_CLOUD = new Set<AgentRole>(["dev", "security", "qa"]);
+
+/**
+ * Résout le mode d'exécution optimal pour un rôle donné.
+ * - dev/security/qa → toujours cloud (interaction PR GitHub requise)
+ * - autres rôles + localPath défini → local en premier (fallback cloud géré par runAgent)
+ * - autres rôles sans localPath → cloud (pas de repo local disponible)
+ */
+export function resolveCloudMode(session: OrchestratorSession, role: AgentRole): boolean {
+  if (ROLES_REQUIRING_CLOUD.has(role)) return true;
+  return !session.activeProject?.localPath;
+}
+
 function normalizeAgentWaitOutcome(raw: unknown): string {
   if (raw == null) return "";
   if (typeof raw === "string") return raw.trim();
@@ -45,6 +59,8 @@ export async function runAgent(
     additionalContext?: string;
     frugal?: boolean;
     issueSize?: IssueSize;
+    /** Arrêt anticipé : appelé après chaque bloc de texte reçu ; si retourne true, le stream est annulé. */
+    earlyStop?: (accumulated: string) => boolean;
   } = {},
 ): Promise<string> {
   const config = AGENT_CONFIG[role];
@@ -135,7 +151,27 @@ export async function runAgent(
       }
 
       try {
-        return await run!.wait();
+        // Stream for all modes: local never populates run.wait().result; cloud benefits from earlyStop
+        let text = "";
+        try {
+          for await (const event of run!.stream()) {
+            if (event.type === "assistant") {
+              for (const block of event.message.content) {
+                if (block.type === "text") {
+                  text += block.text;
+                  if (options.earlyStop?.(text)) {
+                    run!.cancel().catch(() => {});
+                    return text.trim();
+                  }
+                }
+              }
+            }
+          }
+        } catch (streamErr) {
+          // Stream interrupted (e.g. after cancel): return partial text if non-empty
+          if (!text) throw streamErr;
+        }
+        return text.trim();
       } catch (e) {
         throw new Error(`L'agent ${role} n'a pas terminé correctement : ${formatErrorMessage(e)}`, { cause: e });
       } finally {

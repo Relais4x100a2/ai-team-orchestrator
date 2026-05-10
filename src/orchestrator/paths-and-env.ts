@@ -18,6 +18,12 @@ export function previewText(text: string, maxLength = 120): string {
   return compact.length <= maxLength ? compact : `${compact.slice(0, maxLength - 1)}…`;
 }
 
+/** Tronque un contexte markdown en préservant la structure (retours à la ligne). */
+export function trimContext(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars) + "\n\n[…tronqué]";
+}
+
 export function resolveUserPath(inputPath: string): { absolutePath: string; displayPath: string } {
   const trimmed = inputPath.trim();
   if (!trimmed) throw new Error("Chemin vide.");

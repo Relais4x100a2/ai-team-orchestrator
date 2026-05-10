@@ -241,6 +241,33 @@ export function detectQAVerdict(qaReport: string): QAVerdict {
   return "APPROVE";
 }
 
+/**
+ * Retourne true dès qu’une directive `VERDICT SÉCURITÉ:` / `SECURITY_VERDICT:` parseable
+ * est présente dans le texte accumulé — utilisé pour l’arrêt anticipé du stream.
+ * N’utilise PAS les heuristiques de fallback pour éviter les faux positifs en cours de génération.
+ */
+export function hasDefinitiveSecurityVerdict(text: string): boolean {
+  const re = /^\s*(?:VERDICT\s*S[ÉE]CURIT[ÉE]|SECURITY_VERDICT|SECURITY\s+VERDICT)\s*[:：]\s*(.+)$/gim;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (mapSecurityVerdictToken(m[1]!)) return true;
+  }
+  return false;
+}
+
+/**
+ * Retourne true dès qu’une directive `VERDICT:` / `VERDICT QA:` parseable est présente.
+ * N’utilise PAS les heuristiques de fallback pour éviter les faux positifs en cours de génération.
+ */
+export function hasDefinitiveQAVerdict(text: string): boolean {
+  const re = /^\s*VERDICT(?:\s+QA)?\s*[:：]\s*(.+)$/gim;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (mapQAVerdictFromDirectiveValue(m[1]!)) return true;
+  }
+  return false;
+}
+
 /** Déduit le niveau d’alerte sécurité à partir du texte du rapport Sécurité. */
 export function detectSecurityVerdict(securityReport: string): SecurityVerdict {
   const fromDirective = securityVerdictFromDirectiveLine(securityReport);

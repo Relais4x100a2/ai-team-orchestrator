@@ -3,8 +3,8 @@ import { basename } from "path";
 import { PIPELINE_STEPS, type AgentRole, type PipelineStep } from "../agent-config.js";
 import { resolveBriefFilePath } from "../models.js";
 import { checkFrugalMode } from "../spend-guard.js";
-import { syncBacklogToGitHub } from "../github-sync.js";
-import { runAgent, AGENT_CONFIG } from "./agent-runner.js";
+import { syncBacklogToGitHub, pullIssuesFromGitHub } from "../github-sync.js";
+import { runAgent, AGENT_CONFIG, resolveCloudMode } from "./agent-runner.js";
 import { enforceProjectBranchGuard } from "./branch-guard.js";
 import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
 import { loadProject } from "./project-loader.js";
@@ -102,7 +102,7 @@ export async function main(): Promise<void> {
     }
 
     const frugal = await checkFrugalMode(process.env);
-    await runAgent(session, role, task, { cloud: true, frugal, additionalContext });
+    await runAgent(session, role, task, { cloud: resolveCloudMode(session, role), frugal, additionalContext });
   } else if (pipelineFlag !== -1) {
     const subcommand = args[pipelineFlag + 1];
     if (subcommand === "next") {
@@ -134,6 +134,31 @@ export async function main(): Promise<void> {
     const backlog = loadBacklog(session);
     const count = await syncBacklogToGitHub(backlog, session.activeProject.repo, token);
     if (count > 0) saveBacklog(session, backlog);
+  } else if (args.includes("--pull-issues")) {
+    if (!session.activeProject?.repo) {
+      console.error("❌ --pull-issues nécessite --project avec un champ repo: dans le frontmatter.");
+      process.exit(1);
+    }
+    const token = process.env.GITHUB_TOKEN;
+    if (!token) {
+      console.error("❌ --pull-issues nécessite GITHUB_TOKEN dans .env.");
+      process.exit(1);
+    }
+    const importNew = !args.includes("--no-import");
+    const backlog = loadBacklog(session);
+    console.log(`\n📥 Pull GitHub Issues → backlog.json (${session.activeProject.repo})`);
+    const result = await pullIssuesFromGitHub(backlog, session.activeProject.repo, token, { importNew });
+    if (result.statusClosed + result.labelsUpdated + result.imported > 0) {
+      saveBacklog(session, backlog);
+      console.log(`\n✅ Backlog mis à jour :`);
+      if (result.statusClosed) console.log(`   ${result.statusClosed} issue(s) marquée(s) done`);
+      if (result.labelsUpdated) console.log(`   ${result.labelsUpdated} issue(s) avec labels mis à jour`);
+      if (result.imported) console.log(`   ${result.imported} nouvelle(s) issue(s) importée(s)`);
+      if (result.conflicts) console.log(`   ⚠️  ${result.conflicts} conflit(s) ignoré(s) (in_progress)`);
+    } else {
+      console.log(`\n✅ Backlog déjà à jour — aucune modification.`);
+      if (result.conflicts) console.log(`   ⚠️  ${result.conflicts} conflit(s) ignoré(s) (in_progress)`);
+    }
   } else if (pmBacklogFlag !== -1) {
     await pmBacklogWorkflow(session);
   } else if (backlogFlag !== -1) {
@@ -166,6 +191,12 @@ Usage :
 
   npm run backlog
     → Affiche l'état du backlog (todo/in_progress/done)
+
+  npm run sync:issues -- --project projects/mon-projet.md
+    → Pousse les issues backlog.json sans numéro GitHub vers GitHub Issues
+
+  npm run pull:issues -- --project projects/mon-projet.md
+    → Rapatrie les statuts/labels GitHub Issues vers backlog.json (--no-import pour ne pas importer les nouvelles)
 
   npm test
     → Exécute les tests unitaires (validation backlog.json côté modèle)

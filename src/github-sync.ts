@@ -9,7 +9,8 @@
  * Prérequis : GITHUB_TOKEN dans .env, repo GitHub dans le fichier projet.
  */
 
-import type { Backlog, BacklogIssue } from "./models.js";
+import type { Backlog, BacklogIssue, IssuePriority, IssueSize } from "./models.js";
+import { generateIssueId } from "./backlog.js";
 
 /** Extrait "owner/repo" depuis une URL GitHub. */
 export function extractOwnerRepo(repoUrl: string): string {
@@ -231,4 +232,225 @@ export async function syncBacklogToGitHub(
 
   console.log(`\n   ${created}/${pending.length} issue(s) créée(s).`);
   return created;
+}
+
+// ─── Pull : GitHub Issues → backlog ──────────────────────────────────────────
+
+/** Shape minimale d'une issue retournée par l'API GitHub. */
+interface GitHubIssueRaw {
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  labels: Array<{ name: string }>;
+  pull_request?: unknown;
+}
+
+/** Shape d'un commentaire retourné par l'API GitHub. */
+export interface GitHubCommentRaw {
+  id: number;
+  body: string | null;
+  user: { login: string } | null;
+  created_at: string;
+}
+
+/** Résumé de l'opération de pull GitHub → backlog. */
+export interface PullSyncResult {
+  statusClosed: number;
+  labelsUpdated: number;
+  conflicts: number;
+  imported: number;
+  noChange: number;
+}
+
+/**
+ * Convertit les labels GitHub en champs priority/size de BacklogIssue.
+ * Retourne null pour un champ absent (l'appelant ne surcharge pas la valeur existante).
+ * Insensible à la casse pour la valeur après ":".
+ */
+export function parseLabelsFromGitHub(
+  labels: Array<{ name: string }>,
+): { priority: IssuePriority | null; size: IssueSize | null } {
+  let priority: IssuePriority | null = null;
+  let size: IssueSize | null = null;
+
+  for (const label of labels) {
+    if (!priority) {
+      const pm = label.name.match(/^priority:(must|should|could|wont)$/i);
+      if (pm) priority = pm[1]!.toUpperCase() as IssuePriority;
+    }
+    if (!size) {
+      const sm = label.name.match(/^size:(S|M|L|XL)$/i);
+      if (sm) size = sm[1]!.toUpperCase() as IssueSize;
+    }
+    if (priority && size) break;
+  }
+
+  return { priority, size };
+}
+
+/** Récupère toutes les issues d'un repo avec pagination automatique. PRs filtrées. */
+async function fetchAllGitHubIssues(
+  ownerRepo: string,
+  token: string,
+  perPage = 100,
+): Promise<GitHubIssueRaw[]> {
+  const collected: GitHubIssueRaw[] = [];
+  let page = 1;
+
+  while (true) {
+    const url = `${GITHUB_REST}/${ownerRepo}/issues?state=all&per_page=${perPage}&page=${page}`;
+    const res = await fetch(url, { headers: githubApiHeaders(token) });
+    if (!res.ok) {
+      throw new Error(`GitHub API ${res.status} lors de la pagination des issues (page ${page})`);
+    }
+    const batch = (await res.json()) as GitHubIssueRaw[];
+    collected.push(...batch);
+    if (batch.length < perPage) break;
+    page++;
+  }
+
+  return collected.filter(i => !("pull_request" in i));
+}
+
+/**
+ * Récupère les commentaires d'une issue GitHub (limite 100, sans pagination).
+ * Fail-open : retourne [] et log un warning en cas d'erreur HTTP.
+ */
+export async function fetchIssueComments(
+  repoUrl: string,
+  token: string,
+  issueNumber: number,
+): Promise<GitHubCommentRaw[]> {
+  let ownerRepo: string;
+  try {
+    ownerRepo = extractOwnerRepo(repoUrl);
+  } catch (e) {
+    console.warn(`fetchIssueComments : ${(e as Error).message}`);
+    return [];
+  }
+
+  const url = `${GITHUB_REST}/${ownerRepo}/issues/${issueNumber}/comments?per_page=100`;
+  const res = await fetch(url, { headers: githubApiHeaders(token) });
+  if (!res.ok) {
+    console.warn(`⚠️  Commentaires GitHub #${issueNumber} : ${res.status} — ignorés.`);
+    return [];
+  }
+  return (await res.json()) as GitHubCommentRaw[];
+}
+
+/**
+ * Formate des commentaires GitHub en bloc Markdown pour injection dans le brief agent.
+ * Retourne "" si comments est vide.
+ */
+export function formatIssueCommentsForBrief(
+  issueNumber: number,
+  comments: GitHubCommentRaw[],
+): string {
+  if (comments.length === 0) return "";
+
+  const lines: string[] = [`## Commentaires GitHub (#${issueNumber})`, ""];
+  for (const c of comments) {
+    const login = c.user?.login ?? "inconnu";
+    const date = c.created_at.slice(0, 10);
+    lines.push(`### @${login} — ${date}`, "", c.body ?? "_(vide)_", "", "---", "");
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Synchronise GitHub Issues → backlog.json.
+ * - Statuts : issue GitHub fermée + backlog todo → marquée done
+ * - Labels : priority/size mis à jour depuis les labels GitHub
+ * - Import : issues GitHub sans correspondance ajoutées (si importNew !== false)
+ *
+ * L'appelant est responsable de sauvegarder le backlog après.
+ */
+export async function pullIssuesFromGitHub(
+  backlog: Backlog,
+  repoUrl: string,
+  token: string,
+  options?: { importNew?: boolean },
+): Promise<PullSyncResult> {
+  const ownerRepo = extractOwnerRepo(repoUrl);
+  const ghIssues = await fetchAllGitHubIssues(ownerRepo, token);
+
+  const result: PullSyncResult = {
+    statusClosed: 0,
+    labelsUpdated: 0,
+    conflicts: 0,
+    imported: 0,
+    noChange: 0,
+  };
+
+  const now = new Date().toISOString();
+  const backlogByGhNumber = new Map<number, BacklogIssue>();
+  for (const issue of backlog.issues) {
+    if (issue.githubIssueNumber != null) backlogByGhNumber.set(issue.githubIssueNumber, issue);
+  }
+
+  for (const gh of ghIssues) {
+    const local = backlogByGhNumber.get(gh.number);
+
+    if (local) {
+      let changed = false;
+      let wasStatusClosed = false;
+
+      if (gh.state === "closed" && local.status !== "done" && local.status !== "skipped") {
+        if (local.status === "in_progress") {
+          console.warn(
+            `⚠️  Conflit : [${local.id}] est in_progress mais GitHub #${gh.number} est fermée. Pipeline en cours — ignoré.`,
+          );
+          result.conflicts++;
+          continue;
+        }
+        local.status = "done";
+        local.completedAt = now;
+        local.updatedAt = now;
+        console.log(`  ✅ [${local.id}] marquée done (GitHub #${gh.number} fermée)`);
+        result.statusClosed++;
+        wasStatusClosed = true;
+        changed = true;
+      }
+
+      const labelChanges = parseLabelsFromGitHub(gh.labels);
+      let labelsChanged = false;
+      if (labelChanges.priority !== null && labelChanges.priority !== local.priority) {
+        local.priority = labelChanges.priority;
+        local.updatedAt = now;
+        changed = true;
+        labelsChanged = true;
+      }
+      if (labelChanges.size !== null && labelChanges.size !== local.size) {
+        local.size = labelChanges.size;
+        local.updatedAt = now;
+        changed = true;
+        labelsChanged = true;
+      }
+      if (labelsChanged && !wasStatusClosed) result.labelsUpdated++;
+
+      if (!changed) result.noChange++;
+    } else if (options?.importNew !== false) {
+      const labelChanges = parseLabelsFromGitHub(gh.labels);
+      const newId = generateIssueId(backlog);
+      const newIssue: BacklogIssue = {
+        id: newId,
+        title: gh.title.slice(0, 200),
+        description: `_Importée depuis GitHub #${gh.number}_\n\n(description à enrichir)`,
+        status: gh.state === "closed" ? "done" : "todo",
+        priority: labelChanges.priority ?? "SHOULD",
+        size: labelChanges.size ?? "M",
+        createdAt: now,
+        updatedAt: now,
+        completedAt: gh.state === "closed" ? now : null,
+        pipelineRun: null,
+        githubIssueNumber: gh.number,
+        source: "bottom_up",
+      };
+      backlog.issues.push(newIssue);
+      console.log(`  📥 [${newId}] importée depuis GitHub #${gh.number} : ${gh.title.slice(0, 60)}`);
+      result.imported++;
+    }
+  }
+
+  return result;
 }

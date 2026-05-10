@@ -1,16 +1,21 @@
 import { PIPELINE_STEPS, type PipelineStep } from "../agent-config.js";
 import type { BacklogIssue, IssueSize } from "../backlog.js";
 import { pickNextIssue } from "../backlog.js";
-import { closeGitHubIssueWithComment } from "../github-sync.js";
-import { detectQAVerdict, detectSecurityVerdict } from "../pipeline-detection.js";
+import { closeGitHubIssueWithComment, fetchIssueComments, formatIssueCommentsForBrief } from "../github-sync.js";
+import {
+  detectQAVerdict,
+  detectSecurityVerdict,
+  hasDefinitiveQAVerdict,
+  hasDefinitiveSecurityVerdict,
+} from "../pipeline-detection.js";
 import { appendPipelineRun } from "../pipeline-runs.js";
 import { checkFrugalMode } from "../spend-guard.js";
 import type { PipelineRunStatus } from "../models.js";
 import { newPipelineRunId } from "../models.js";
 import { buildQAPipelineContext, buildSecurityImplementationContext } from "./context-builders.js";
-import { formatErrorMessage } from "./paths-and-env.js";
+import { formatErrorMessage, trimContext } from "./paths-and-env.js";
 import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
-import { runAgent } from "./agent-runner.js";
+import { runAgent, resolveCloudMode } from "./agent-runner.js";
 import { runArchitectForBacklogReflection } from "./pipeline-backlog.js";
 import type { OrchestratorSession } from "./session.js";
 
@@ -38,7 +43,8 @@ async function runArchitectForTicketExecution(
   frugal: boolean,
   issueSize: IssueSize | undefined,
 ): Promise<string> {
-  const useCloud = isPipelineArchitectCloud();
+  // Si pas de localPath, forcer cloud même si PIPELINE_ARCHITECT_CLOUD=false
+  const useCloud = isPipelineArchitectCloud() || resolveCloudMode(session, "architect");
   const task =
     "Fournis un cadrage architecture ciblé pour sécuriser l'exécution de ce backlog item (contraintes, risques, points d'attention).";
   let out = await runAgent(session, "architect", task, {
@@ -87,6 +93,26 @@ export async function pipelineNext(session: OrchestratorSession): Promise<void> 
   const issueRef = issue.githubIssueNumber
     ? `\n\nCette implémentation doit refermer l'issue GitHub #${issue.githubIssueNumber} — inclure \`close #${issue.githubIssueNumber}\` dans le message de commit ou la description de PR.`
     : "";
+
+  // Enrichissement : commentaires GitHub comme contexte pour les agents
+  let githubCommentsBlock = "";
+  {
+    const ghNum = issue.githubIssueNumber;
+    const repo = session.activeProject?.repo?.trim();
+    const ghToken = process.env.GITHUB_TOKEN?.trim();
+    if (ghNum != null && repo && ghToken) {
+      try {
+        const comments = await fetchIssueComments(repo, ghToken, ghNum);
+        if (comments.length > 0) {
+          githubCommentsBlock = "\n\n" + formatIssueCommentsForBrief(ghNum, comments);
+          console.log(`   💬 ${comments.length} commentaire(s) GitHub récupéré(s) pour #${ghNum}`);
+        }
+      } catch (e) {
+        console.warn(`   ⚠️  Commentaires GitHub #${ghNum} : ${formatErrorMessage(e)}`);
+      }
+    }
+  }
+
   try {
     const executionStartBySize: Record<IssueSize, PipelineStep> = {
       S: "dev",
@@ -95,7 +121,7 @@ export async function pipelineNext(session: OrchestratorSession): Promise<void> 
       XL: "architect",
     };
     const executionStart = executionStartBySize[issue.size];
-    await fullPipeline(session, issue.description + issueRef, {
+    await fullPipeline(session, issue.description + issueRef + githubCommentsBlock, {
       pipelineRunId,
       issueSize: issue.size,
       resumeFrom: executionStart,
@@ -284,7 +310,6 @@ export async function fullPipeline(
 
     if (startIdx <= 3) {
       console.log("\n💻 ÉTAPE 4/6 — Développeur Full-Stack");
-      frugal = frugal || (await checkFrugalMode(process.env));
       if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
     }
 
@@ -308,23 +333,23 @@ export async function fullPipeline(
       while (!securityApproved && securityIteration < maxSecurityIterations) {
         securityIteration++;
         console.log(`\n🔐 ÉTAPE 5/6 — Sécurité — itération ${securityIteration}/${maxSecurityIterations}`);
-        frugal = frugal || (await checkFrugalMode(process.env));
         if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
 
         const securityPrompt =
           securityIteration === 1
             ? "Audite la PR pour les vulnérabilités de sécurité."
-            : `Re-audite après corrections.\n\nRapport précédent sécurité :\n${securityReport}`;
+            : `Re-audite après corrections.\n\nRapport précédent sécurité :\n${trimContext(securityReport, 1500)}`;
 
         securityReport = await runAgent(
           session,
           "security",
           securityPrompt,
           {
-            additionalContext: buildSecurityImplementationContext(session, implementation),
+            additionalContext: buildSecurityImplementationContext(session, trimContext(implementation, 2000)),
             cloud: true,
             frugal,
             issueSize: pipelineIssueSize,
+            earlyStop: hasDefinitiveSecurityVerdict,
           },
         );
 
@@ -338,7 +363,7 @@ export async function fullPipeline(
           implementation = await runAgent(
             session,
             "dev",
-            `Corrige les vulnérabilités critiques signalées par la sécurité.\n\n${securityReport}`,
+            `Corrige les vulnérabilités critiques signalées par la sécurité.\n\n${trimContext(securityReport, 2000)}`,
             {
               additionalContext: devContext,
               cloud: true,
@@ -366,13 +391,12 @@ export async function fullPipeline(
     while (!qaApproved && qaIteration < maxQAIterations) {
       qaIteration++;
       console.log(`\n🧪 ÉTAPE 6/6 — QA Engineer — itération ${qaIteration}/${maxQAIterations}`);
-      frugal = frugal || (await checkFrugalMode(process.env));
       if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
 
       const qaPrompt =
         qaIteration === 1
           ? "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité au backlog."
-          : `Re-review la PR après les changements du développeur.\n\nVoici le rapport précédent de QA :\n${qaReport}\n\nVérifie si les problèmes identifiés ont été correctement adressés.`;
+          : `Re-review la PR après les changements du développeur.\n\nVoici le rapport précédent de QA :\n${trimContext(qaReport, 2000)}\n\nVérifie si les problèmes identifiés ont été correctement adressés.`;
 
       qaReport = await runAgent(
         session,
@@ -382,11 +406,11 @@ export async function fullPipeline(
           additionalContext: buildQAPipelineContext(
             session,
             [
-              `## Backlog formalisé\n${specs}`,
-              architectureVision ? `## Vision architecture\n${architectureVision}` : null,
-              reflectionChallenge ? `## Challenge amont\n${reflectionChallenge}` : null,
-              securityReport ? `## Rapport sécurité\n${securityReport}` : null,
-              `## Implémentation\n${implementation}`,
+              `## Backlog formalisé\n${trimContext(specs, 4000)}`,
+              architectureVision ? `## Vision architecture\n${trimContext(architectureVision, 1500)}` : null,
+              reflectionChallenge ? `## Challenge amont\n${trimContext(reflectionChallenge, 1000)}` : null,
+              securityReport ? `## Rapport sécurité\n${trimContext(securityReport, 1200)}` : null,
+              `## Implémentation\n${trimContext(implementation, 2000)}`,
             ]
               .filter(Boolean)
               .join("\n\n"),
@@ -394,6 +418,7 @@ export async function fullPipeline(
           cloud: true,
           frugal,
           issueSize: pipelineIssueSize,
+          earlyStop: hasDefinitiveQAVerdict,
         },
       );
 
@@ -416,7 +441,7 @@ export async function fullPipeline(
       implementation = await runAgent(
         session,
         "dev",
-        `Corrige les problèmes soulevés par QA dans la revue précédente :\n\n${qaReport}\n\nMet à jour la PR avec les changements.`,
+        `Corrige les problèmes soulevés par QA dans la revue précédente :\n\n${trimContext(qaReport, 2000)}\n\nMet à jour la PR avec les changements.`,
         {
           additionalContext: devContext,
           cloud: true,
@@ -431,10 +456,11 @@ export async function fullPipeline(
         "security",
         "Re-vérifie rapidement les impacts sécurité après corrections demandées par QA.",
         {
-          additionalContext: buildSecurityImplementationContext(session, implementation),
+          additionalContext: buildSecurityImplementationContext(session, trimContext(implementation, 2000)),
           cloud: true,
           frugal,
           issueSize: pipelineIssueSize,
+          earlyStop: hasDefinitiveSecurityVerdict,
         },
       );
       securityReport = securityAfterQaFix;
@@ -444,7 +470,7 @@ export async function fullPipeline(
         implementation = await runAgent(
           session,
           "dev",
-          `Corrige les vulnérabilités critiques apparues après corrections QA :\n\n${securityAfterQaFix}`,
+          `Corrige les vulnérabilités critiques apparues après corrections QA :\n\n${trimContext(securityAfterQaFix, 1500)}`,
           {
             additionalContext: devContext,
             cloud: true,

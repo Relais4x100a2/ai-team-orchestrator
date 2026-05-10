@@ -5,7 +5,7 @@ import { generateIssueId, parsePMOutput } from "../backlog.js";
 import { checkFrugalMode } from "../spend-guard.js";
 import { previewText, REPO_ROOT } from "./paths-and-env.js";
 import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
-import { runAgent } from "./agent-runner.js";
+import { runAgent, resolveCloudMode } from "./agent-runner.js";
 import { migrateLegacySecurityFile, resolveLastRunDir } from "./run-context.js";
 import type { OrchestratorSession } from "./session.js";
 
@@ -51,7 +51,7 @@ export async function runArchitectForBacklogReflection(
     session,
     "architect",
     "Produit la vision cible pour les items Must/Should du backlog (cible, hypothèses/contraintes, alternative crédible, risques principaux).",
-    { additionalContext: specs, frugal, issueSize, cloud: true },
+    { additionalContext: specs, frugal, issueSize, cloud: resolveCloudMode(session, "architect") },
   );
 }
 
@@ -71,7 +71,7 @@ export async function pmBacklogWorkflow(session: OrchestratorSession): Promise<v
 
   const pmTask = `Analyse le repo ${repoUrl} et produis la liste complète des issues prioritaires à implémenter. Pour CHAQUE issue, utilise EXACTEMENT le format défini (## 🎯 User Story, ## 🏷️ Priorité, ## 📏 Taille estimée, etc.). Sépare chaque issue par une ligne "---".`;
 
-  const pmOutput = await runAgent(session, "pm", pmTask, { cloud: true });
+  const pmOutput = await runAgent(session, "pm", pmTask, { cloud: resolveCloudMode(session, "pm") });
   const parsedIssues = parsePMOutput(pmOutput);
 
   if (parsedIssues.length === 0) {
@@ -121,7 +121,7 @@ export async function pipelineBacklogReflection(
   const specs = await runAgent(session, "pm", pmTask, {
     additionalContext: brief,
     frugal,
-    cloud: true,
+    cloud: resolveCloudMode(session, "pm"),
   });
 
   const architecture = await runArchitectForBacklogReflection(session, specs, frugal);
@@ -133,7 +133,7 @@ export async function pipelineBacklogReflection(
     {
       additionalContext: `## Backlog\n${specs}\n\n## Vision architecture\n${architecture}`,
       frugal,
-      cloud: true,
+      cloud: resolveCloudMode(session, "redteam_reflection"),
     },
   );
 
