@@ -160,6 +160,35 @@ Au démarrage avec `npm run project -- monprojet` :
 - `local_path` devient le **répertoire de travail** des agents locaux (PM, Architect) — ils voient et lisent le vrai code source
 - `repo` + `branch` définissent la cible des agents cloud (Dev, sécurité, QA)
 
+### Données projet dans le dépôt local (`local_path`)
+
+Si **`local_path`** est présent dans le frontmatter, le répertoire de données (backlog, `run-context.json`, sorties `<role>.md`) n’est plus uniquement `last-run/<slug>/` à la racine de l’orchestrateur : il est par défaut :
+
+`<local_path>/.ai-team-orchestrator/`
+
+| Entrée frontmatter | Rôle |
+|---|---|
+| `local_path` | Racine du clone ; obligatoire pour ce mode « embarqué » |
+| `project_data_dir` | Optionnel, relatif à `local_path` (défaut : `.ai-team-orchestrator`). Interdit : chemins absolus, segments `..` |
+| `project_context` | Optionnel : fichier markdown de contexte long, relatif à `project_data_dir`. Si la clé est présente, le fichier **doit exister** |
+
+**Ordre de résolution du texte de contexte** injecté dans les agents :
+
+1. Fichier indiqué par `project_context` (si la clé est définie dans le YAML — obligation d’exister) ;
+2. Sinon, si `context.md` existe sous `project_data_dir`, son contenu ;
+3. Sinon, le **corps** du fichier `projects/<slug>.md` (après le frontmatter), comme avant — utile pour migrer sans tout déplacer d’un coup ;
+4. Sinon, chaîne vide.
+
+Les clés `project_data_dir` et `project_context` **sans** `local_path` provoquent une erreur explicite.
+
+À la **première création** de ce dossier, un `.gitignore` minimal (`*` + `!.gitignore`) y est ajouté s’il n’existait pas encore : par défaut rien n’est versionné ; ajoute des lignes `!backlog.json` (etc.) si l’équipe veut suivre certains fichiers dans Git.
+
+Si tu passes d’un ancien dépôt des données dans `last-run/<slug>/` vers le dépôt cible, l’orchestrateur affiche un rappel pour copier manuellement (`cp -a last-run/<slug>/. <projectDataDir>/`).
+
+**Migration du détail projet (stack, conventions, etc.)** : avec `local_path` renseigné, exécute `npm run migrate:project-context`. Le script écrit le corps markdown de chaque `projects/<slug>.md` dans `<projectDataDir>/context.md`, puis ne laisse que le **frontmatter** dans le fichier `projects/` (les entrées sans `local_path` sont ignorées). Tu peux relancer la commande après avoir édité un fichier projet : un `context.md` déjà présent est alors remplacé (avertissement en console).
+
+**Sans `local_path`** : comportement inchangé — `last-run/<slug>/` sous la racine de l’orchestrateur et contexte = corps du `projects/*.md`.
+
 ### Ajouter un nouveau projet
 
 1. Copie `projects/_template.md` en `projects/monprojet.md`
@@ -199,7 +228,7 @@ npm run project -- monprojet --pipeline full "Brief de la fonctionnalité"
 npm run project -- monprojet --pipeline next
 ```
 
-Par défaut, `pipeline next` lance uniquement la partie exécution (depuis `dev` pour `S`, depuis `architect` pour `M/L/XL`). Pour changer le point d'entrée, utiliser explicitement `--resume-from`.
+Par défaut, `pipeline next` lance uniquement la partie exécution (depuis `dev` pour `S`, depuis `architect` pour `M/L/XL`). Pour changer le point d'entrée, utiliser explicitement `npm run project -- monprojet --pipeline`.
 
 ### Mode pipeline backlog (partie 1)
 
@@ -220,8 +249,8 @@ npm run project -- monprojet --pipeline backlog backward "Retours utilisateurs e
 - point d'entrée `architect` pour les tailles `M/L/XL`
 
 **Reprise et fichiers de brief :**
-Après chaque exécution d’un agent, sa sortie est automatiquement sauvegardée dans `last-run/<slug>/<role>.md` (où `<slug>` est le nom du fichier projet sans `.md`).  
-Un index `last-run/<slug>/run-context.json` est aussi maintenu pour tracer les derniers artefacts (fichiers par rôle, URL de branche et URL de PR détectées) afin de faciliter les reprises ciblées.
+Après chaque exécution d’un agent, sa sortie est sauvegardée sous le **répertoire de données du projet** : soit `last-run/<slug>/` à la racine de l’orchestrateur (pas de `local_path`), soit `<local_path>/<project_data_dir>/` (défaut `.ai-team-orchestrator`). Le chemin exact est indiqué dans la sortie CLI.  
+Un index `run-context.json` dans ce même répertoire est aussi maintenu pour tracer les derniers artefacts (fichiers par rôle, URL de branche et URL de PR détectées) afin de faciliter les reprises ciblées.
 
 > Compatibilité : les anciens fichiers `redteam.md` sont migrés automatiquement vers `security.md` s’ils existent encore.
 >

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "fs";
+import { writeFileSync } from "fs";
 import { resolve } from "path";
 import { Agent } from "@cursor/sdk";
 import {
@@ -9,7 +9,7 @@ import {
 } from "../agent-config.js";
 import type { IssueSize } from "../backlog.js";
 import { runCloudAgentWithPolicy } from "../cloud-policy.js";
-import { formatErrorMessage, previewText } from "./paths-and-env.js";
+import { formatDataDirPath, formatErrorMessage, mkdirWithDefaultGitignoreIfNeeded, previewText } from "./paths-and-env.js";
 import { loadPrompt } from "./prompts.js";
 import {
   migrateLegacySecurityFile,
@@ -234,19 +234,22 @@ export async function runAgent(
   if (result) {
     if (!session.activeProjectSlug) {
       console.log(
-        `\n   ℹ️  Sortie non sauvegardée (pas de --project). Passe --project projects/<fichier>.md pour activer last-run/<slug>/${role}.md.`,
+        `\n   ℹ️  Sortie non sauvegardée (pas de --project). Passe --project projects/<fichier>.md pour activer la sauvegarde sous last-run/<slug>/ ou sous le dépôt local (local_path + données projet).`,
       );
     } else {
       try {
         const lastRunDir = resolveLastRunDir(session);
-        mkdirSync(lastRunDir, { recursive: true });
-        migrateLegacySecurityFile(lastRunDir);
+        mkdirWithDefaultGitignoreIfNeeded(lastRunDir);
+        if (!session.activeProject?.projectDataDir) {
+          migrateLegacySecurityFile(lastRunDir);
+        }
         const outputFile = ROLE_OUTPUT_FILE[role];
-        writeFileSync(resolve(lastRunDir, outputFile), result, "utf-8");
+        const outPath = resolve(lastRunDir, outputFile);
+        writeFileSync(outPath, result, "utf-8");
         saveLastRunContext(session, lastRunDir, role, [task, options.additionalContext, result].filter(Boolean).join("\n\n"));
-        console.log(`\n   💾 Sortie sauvegardée : last-run/${session.activeProjectSlug}/${outputFile}`);
+        console.log(`\n   💾 Sortie sauvegardée : ${formatDataDirPath(outPath)}`);
       } catch (e) {
-        console.error(`   ⚠️  Impossible de sauvegarder la sortie last-run : ${(e as Error).message}`);
+        console.error(`   ⚠️  Impossible de sauvegarder la sortie agent : ${(e as Error).message}`);
       }
     }
   }

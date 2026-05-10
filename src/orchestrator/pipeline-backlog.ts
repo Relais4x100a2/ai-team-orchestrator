@@ -1,9 +1,9 @@
-import { mkdirSync, writeFileSync } from "fs";
+import { writeFileSync } from "fs";
 import { resolve } from "path";
 import type { IssueSize } from "../backlog.js";
 import { generateIssueId, parsePMOutput } from "../backlog.js";
 import { checkFrugalMode } from "../spend-guard.js";
-import { previewText, REPO_ROOT } from "./paths-and-env.js";
+import { formatDataDirPath, mkdirWithDefaultGitignoreIfNeeded, previewText, REPO_ROOT } from "./paths-and-env.js";
 import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
 import { runAgent, resolveCloudMode } from "./agent-runner.js";
 import { migrateLegacySecurityFile, resolveLastRunDir } from "./run-context.js";
@@ -18,8 +18,10 @@ function savePmParseFailureArtifacts(
   try {
     if (session.activeProjectSlug) {
       const dir = resolveLastRunDir(session);
-      mkdirSync(dir, { recursive: true });
-      migrateLegacySecurityFile(dir);
+      mkdirWithDefaultGitignoreIfNeeded(dir);
+      if (!session.activeProject?.projectDataDir) {
+        migrateLegacySecurityFile(dir);
+      }
       const basePath = resolve(dir, "pm-parse-failure");
       writeFileSync(`${basePath}.raw.md`, pmOutput, "utf-8");
       if (extras?.architecture?.trim()) {
@@ -28,9 +30,7 @@ function savePmParseFailureArtifacts(
       if (extras?.reflection?.trim()) {
         writeFileSync(`${basePath}.reflection.md`, extras.reflection, "utf-8");
       }
-      console.log(
-        `   📝 Sortie brute (parse PM) : last-run/${session.activeProjectSlug}/pm-parse-failure.*.md`,
-      );
+      console.log(`   📝 Sortie brute (parse PM) : ${formatDataDirPath(basePath)}.*.md`);
     } else {
       const fallback = "backlog-raw.md";
       writeFileSync(resolve(REPO_ROOT, fallback), pmOutput, "utf-8");

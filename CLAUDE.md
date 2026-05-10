@@ -54,6 +54,7 @@ npm run build        # tsc — compile le projet
 npx tsc --noEmit     # Vérification types sans écrire de fichiers (obligatoire avant changement TS)
 npm test             # Tests (backlog PM, verdicts pipeline) — `tsx --test`
 npm run verify:prompts  # Vérifie que tous les `src/prompts/*.md` référencés existent
+npm run migrate:project-context  # Corps des projects/*.md avec local_path → context.md dans le dépôt cloné ; projects/ réduit au frontmatter
 
 npm run start        # Aide interactive + liste des rôles (--role)
 
@@ -87,8 +88,8 @@ npm run agent:privacy
 
 | Option | Rôle |
 |--------|------|
-| `--project <fichier>` | Charge `projects/…`. Fichier `last-run/<slug>/` pour les sorties et le backlog dédié. |
-| `--brief-file <fichier>` | Brief ou tâche lus depuis un fichier (chemins relatifs au cwd ou absolus). Utile avec `last-run/<slug>/pm.md`. |
+| `--project <fichier>` | Charge `projects/…`. Sorties agents + backlog : `last-run/<slug>/` sans `local_path` ; avec `local_path`, sous `<local_path>/<project_data_dir>/` (défaut `.ai-team-orchestrator`). |
+| `--brief-file <fichier>` | Brief ou tâche lus depuis un fichier (chemins relatifs au cwd ou absolus). Peut pointer vers `pm.md` du répertoire de données (orchestrateur ou dépôt cible). |
 | `--resume-from <étape>` | Reprend le pipeline : `pm` \| `architect` \| `redteam_reflection` \| `dev` \| `security` \| `qa`. Le brief fourni remplace le contexte des étapes ignorées. (`pipeline next` démarre par défaut en exécution: `dev` pour `S`, `architect` pour `M/L/XL`) |
 | `--sync-issues` | Crée les issues GitHub manquantes depuis `backlog.json`. Exige `--project` avec `repo:` dans le frontmatter et `GITHUB_TOKEN` dans `.env`. |
 
@@ -118,8 +119,8 @@ tsx src/orchestrator.ts --project projects/mon-projet.md --sync-issues
 - `src/spend-guard.ts` — Mode frugal selon `SPEND_ALERT_CENTS`
 - `src/verify-prompts.ts` — Vérif présence des fichiers prompts (CI + `npm run verify:prompts`)
 - `src/prompts/*.md` — Prompts système génériques (liste dans le tableau ci-dessus)
-- `projects/*.md` — Fichiers de contexte projet (stack, conventions, contraintes)
-- `last-run/<slug>/` — Avec `--project` : une sortie `<role>.md` par agent et `backlog.json` du projet
+- `projects/*.md` — Fichiers de contexte projet (frontmatter ; corps optionnel si contexte dans le dépôt cible)
+- Répertoire **de données** par projet — Avec `--project` : `last-run/<slug>/` (sans `local_path`) **ou** `<local_path>/.ai-team-orchestrator/` par défaut : `backlog.json`, `run-context.json`, `<role>.md`, `context.md` (contexte long optionnel), `.gitignore` auto à la création
 - `pipeline-runs.json` — Journal des runs de `fullPipeline` (append)
 - `.cursor/mcp.json` — Serveurs MCP (Figma, GitHub)
 - `.cursor/hooks.json` — Hooks de supervision
@@ -151,6 +152,8 @@ Au démarrage, l'orchestrateur peut charger un projet via `--project projects/no
 Le contexte du projet est alors injecté dans **tous les prompts des agents**,
 ce qui rend les agents génériques et adaptables à n'importe quelle stack.
 
+Avec **`local_path`**, le texte long peut être lu depuis `project_context` / `context.md` dans le répertoire `project_data_dir` (voir README : précédence corps projet vs fichier). Les artefacts (`backlog.json`, sorties agents) vivent alors dans ce répertoire sous le dépôt cloné, plutôt que dans `last-run/<slug>/` de l’orchestrateur.
+
 ## Chaîne assurance (rappel)
 
 Le `fullPipeline` ne couvre pas CI/CD, Docker ni la config d’observabilité produite par `devops` / `sre`. Avant merge sur le dépôt cible : revue humaine ciblée et/ou audit sécurité ciblé sur le diff infra, protections de branches, checklist workflows et conteneurs — voir [README.md](README.md) (section « Chaîne assurance »).
@@ -161,7 +164,7 @@ Le `fullPipeline` ne couvre pas CI/CD, Docker ni la config d’observabilité pr
 
 - Les prompts `src/prompts/*.md` sont **génériques et agnostiques**.
   - Ne les modifie que si tu améliores la mécanique d'un rôle (PM, Architect, etc.)
-  - Les références spécifiques au projet viennent du fichier `projects/*.md`, pas du prompt.
+  - Les références spécifiques au projet viennent du fichier `projects/*.md` et, si configuré, du markdown sous `project_data_dir` (`context.md` ou `project_context`), pas du prompt.
 - Les fichiers `projects/*.md` peuvent être librement créés et modifiés pour ajouter de nouveaux projets.
 - Tu peux modifier `src/orchestrator/cli.ts` ou `src/orchestrator/workflows.ts` pour ajouter des fonctionnalités CLI ou de pipeline (en conservant le flux PM → … ⇄ QA) ; le fichier `src/orchestrator.ts` reste un bootstrap court.
 - Les types et schémas partagés du domaine (backlog, pipeline runs, projet) vivent dans **`src/models.ts`** — évite de dupliquer ces définitions ailleurs.

@@ -7,7 +7,7 @@ import { syncBacklogToGitHub, pullIssuesFromGitHub } from "../github-sync.js";
 import { runAgent, AGENT_CONFIG, resolveCloudMode } from "./agent-runner.js";
 import { enforceProjectBranchGuard } from "./branch-guard.js";
 import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
-import { loadProject } from "./project-loader.js";
+import { loadProject, warnIfLegacyLastRunDataExists } from "./project-loader.js";
 import { resolveUserPath } from "./paths-and-env.js";
 import { emptyOrchestratorSession } from "./session.js";
 import {
@@ -43,6 +43,7 @@ export async function main(): Promise<void> {
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "") || null;
     console.log(`🎯 Projet : ${session.activeProject.name} (${session.activeProject.branch})`);
+    warnIfLegacyLastRunDataExists(session.activeProjectSlug, session.activeProject.projectDataDir);
   }
 
   let briefFromFile: string | null = null;

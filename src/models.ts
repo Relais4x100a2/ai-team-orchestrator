@@ -66,6 +66,10 @@ export interface ProjectContext {
   content: string;
   /** Chemin absolu vers la copie locale du repo (optionnel). Utilisé comme workingDirectory pour les agents locaux. */
   localPath?: string;
+  /** Répertoire de données (backlog, sorties agents, run-context) lorsque `local_path` est défini — absolu. */
+  projectDataDir?: string;
+  /** Fichier markdown de contexte long résolu (pour diagnostics). */
+  projectContextPath?: string;
 }
 
 export interface PipelineRun {

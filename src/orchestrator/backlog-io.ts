@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 import type { Backlog } from "../backlog.js";
 import type { IssuePriority, IssueStatus } from "../backlog.js";
 import { parseBacklogJson } from "../models.js";
-import { BACKLOG_FALLBACK_PATH } from "./paths-and-env.js";
+import { BACKLOG_FALLBACK_PATH, mkdirWithDefaultGitignoreIfNeeded } from "./paths-and-env.js";
 import { resolveLastRunDir } from "./run-context.js";
 import type { OrchestratorSession } from "./session.js";
 
@@ -35,7 +35,7 @@ export function loadBacklog(session: OrchestratorSession): Backlog {
 export function saveBacklog(session: OrchestratorSession, backlog: Backlog): void {
   backlog.lastUpdated = new Date().toISOString();
   const path = resolveBacklogPath(session);
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirWithDefaultGitignoreIfNeeded(dirname(path));
   writeFileSync(path, JSON.stringify(backlog, null, 2), "utf-8");
 }
 
