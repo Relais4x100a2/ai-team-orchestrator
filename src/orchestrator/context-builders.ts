@@ -2,7 +2,11 @@ import { loadLastRunContext, resolveLastRunDir } from "./run-context.js";
 import type { OrchestratorSession } from "./session.js";
 
 /** Contexte injecté avant la sortie dev pour cadrer l'audit cloud sur la bonne branche / PR. */
-export function buildSecurityImplementationContext(session: OrchestratorSession, implementationMarkdown: string): string {
+export function buildSecurityImplementationContext(
+  session: OrchestratorSession,
+  implementationMarkdown: string,
+  detectedPrUrl?: string,
+): string {
   const repo = session.activeProject?.repo?.trim() || process.env.TARGET_REPO_URL?.trim() || "—";
   const branch = session.activeProject?.branch?.trim() || process.env.TARGET_BRANCH?.trim() || "—";
   let branchUrlLine = "—";
@@ -12,6 +16,8 @@ export function buildSecurityImplementationContext(session: OrchestratorSession,
     if (ctx?.latestBranchUrl) branchUrlLine = ctx.latestBranchUrl;
     if (ctx?.latestPrUrl) prUrlLine = ctx.latestPrUrl;
   }
+  // URL extraite directement de la sortie Dev — prioritaire sur run-context.json
+  if (detectedPrUrl) prUrlLine = detectedPrUrl;
 
   return [
     "## Cible d'audit (pipeline)",
@@ -30,7 +36,11 @@ export function buildSecurityImplementationContext(session: OrchestratorSession,
 }
 
 /** Préfixe branche / PR pour l'agent QA (cohérent avec la cible cloud). */
-export function buildQAPipelineContext(session: OrchestratorSession, innerMarkdown: string): string {
+export function buildQAPipelineContext(
+  session: OrchestratorSession,
+  innerMarkdown: string,
+  detectedPrUrl?: string,
+): string {
   const repo = session.activeProject?.repo?.trim() || process.env.TARGET_REPO_URL?.trim() || "—";
   const branch = session.activeProject?.branch?.trim() || process.env.TARGET_BRANCH?.trim() || "—";
   let branchUrlLine = "—";
@@ -40,6 +50,8 @@ export function buildQAPipelineContext(session: OrchestratorSession, innerMarkdo
     if (ctx?.latestBranchUrl) branchUrlLine = ctx.latestBranchUrl;
     if (ctx?.latestPrUrl) prUrlLine = ctx.latestPrUrl;
   }
+  // URL extraite directement de la sortie Dev — prioritaire sur run-context.json
+  if (detectedPrUrl) prUrlLine = detectedPrUrl;
 
   return [
     "## Cible de review (pipeline)",

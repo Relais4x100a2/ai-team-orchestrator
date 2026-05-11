@@ -14,6 +14,7 @@ import type { PipelineRunStatus } from "../models.js";
 import { newPipelineRunId } from "../models.js";
 import { buildQAPipelineContext, buildSecurityImplementationContext } from "./context-builders.js";
 import { formatErrorMessage, trimContext } from "./paths-and-env.js";
+import { detectGitHubPrUrl } from "./run-context.js";
 import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
 import { runAgent, resolveCloudMode } from "./agent-runner.js";
 import { runArchitectForBacklogReflection } from "./pipeline-backlog.js";
@@ -330,6 +331,9 @@ export async function fullPipeline(
           )
         : brief;
 
+    let detectedPrUrl: string | undefined = detectGitHubPrUrl(implementation);
+    if (detectedPrUrl) console.log(`   🔗 PR détectée : ${detectedPrUrl}`);
+
     let securityApproved = startIdx > 4;
     const maxSecurityIterations = 3;
     let securityReport = "";
@@ -354,7 +358,7 @@ export async function fullPipeline(
           "security",
           securityPrompt,
           {
-            additionalContext: buildSecurityImplementationContext(session, trimContext(implementation, 6000)),
+            additionalContext: buildSecurityImplementationContext(session, trimContext(implementation, 6000), detectedPrUrl),
             cloud: true,
             frugal,
             issueSize: pipelineIssueSize,
@@ -381,6 +385,7 @@ export async function fullPipeline(
               issueSize: pipelineIssueSize,
             },
           );
+          detectedPrUrl = detectGitHubPrUrl(implementation) ?? detectedPrUrl;
         } else if (securityVerdict === "MEDIUM_ISSUES") {
           mediumSecurityNotes = true;
           securityApproved = true;
@@ -427,6 +432,7 @@ export async function fullPipeline(
             ]
               .filter(Boolean)
               .join("\n\n"),
+            detectedPrUrl,
           ),
           cloud: true,
           frugal,
@@ -463,13 +469,14 @@ export async function fullPipeline(
           issueSize: pipelineIssueSize,
         },
       );
+      detectedPrUrl = detectGitHubPrUrl(implementation) ?? detectedPrUrl;
 
       const securityAfterQaFix = await runAgent(
         session,
         "security",
         "Re-vérifie rapidement les impacts sécurité après corrections demandées par QA.",
         {
-          additionalContext: buildSecurityImplementationContext(session, trimContext(implementation, 6000)),
+          additionalContext: buildSecurityImplementationContext(session, trimContext(implementation, 6000), detectedPrUrl),
           cloud: true,
           frugal,
           issueSize: pipelineIssueSize,
@@ -492,6 +499,7 @@ export async function fullPipeline(
             issueSize: pipelineIssueSize,
           },
         );
+        detectedPrUrl = detectGitHubPrUrl(implementation) ?? detectedPrUrl;
       } else if (securityVerdict === "MEDIUM_ISSUES") {
         mediumSecurityNotes = true;
       }
