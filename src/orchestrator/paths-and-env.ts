@@ -31,6 +31,42 @@ export function extractHandoffSection(text: string, marker: string): string {
   return idx >= 0 ? text.slice(idx).trim() : "";
 }
 
+/**
+ * Avertit en console si la sortie agent est non vide mais ne contient pas le marqueur de handoff attendu
+ * (les étapes aval utiliseront alors un extrait ou une troncature).
+ */
+export function warnIfHandoffFallback(stepLabel: string, fullText: string, marker: string, extracted: string): void {
+  if (!fullText.trim() || extracted.trim()) return;
+  console.warn(
+    `⚠️  ${stepLabel} : marqueur «${marker}» absent — extrait ou troncature utilisé(e) pour les étapes suivantes.`,
+  );
+}
+
+const DEFAULT_MIN_DEV_OUTPUT_CHARS = 80;
+
+/**
+ * Indique si la sortie développeur est trop pauvre pour enchaîner sécurité / QA sans risquer un audit ou une revue sur une section « implémentation » vide.
+ * Contre-exemples : texte assez long, handoff «## Handoff Security & QA» présent, ou PR connue (passée par l’appelant).
+ */
+export function isDevPipelineOutputTooWeak(
+  text: string,
+  options?: { prUrl?: string | undefined; minTrimmedChars?: number },
+): boolean {
+  const raw = text.trim();
+  if (raw.length === 0) return true;
+
+  const minTrimmed = options?.minTrimmedChars ?? DEFAULT_MIN_DEV_OUTPUT_CHARS;
+  if (raw.length >= minTrimmed) return false;
+
+  const pr = options?.prUrl?.trim();
+  if (pr) return false;
+
+  const handoff = extractHandoffSection(text, "## Handoff Security & QA").trim();
+  if (handoff.length > 0) return false;
+
+  return true;
+}
+
 export function resolveUserPath(inputPath: string): { absolutePath: string; displayPath: string } {
   const trimmed = inputPath.trim();
   if (!trimmed) throw new Error("Chemin vide.");

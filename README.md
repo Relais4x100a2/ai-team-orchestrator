@@ -279,9 +279,13 @@ Le pipeline inclut une **boucle de feedback** :
 - QA demande changements → relance Dev, puis re-review (max 3 itérations)
 - Après retouche Dev issue de QA, la sécurité est re-challengée avant la QA suivante
 
+**Garde-fou sortie développeur** : avant chaque passage à la sécurité ou au QA, si la sortie dev est quasi vide, sans section **`## Handoff Security & QA`** exploitable et sans URL de PR ni dans le texte ni dans `run-context.json`, le pipeline **s’arrête avec une erreur explicite** (évite audits / revues sur une section implémentation vide).
+
 Le rapport de l’agent sécurité doit se terminer par une ligne **`VERDICT SÉCURITÉ: APPROVED|MEDIUM|CRITICAL`** (voir `src/prompts/red-team.md`) pour que le pipeline classe le verdict sans ambiguïté. L’orchestrateur injecte aussi la **branche cible** et les URLs `run-context.json` dans le contexte d’audit.
 
 Pour le **QA**, une ligne **`VERDICT QA: …`** ou **`VERDICT: …`** (en fin de rapport de préférence) permet à l’orchestrateur de distinguer **APPROVE** et **REQUEST_CHANGES** sans ambiguïté. Si plusieurs lignes `VERDICT` / `VERDICT QA` sont présentes, **seule la dernière** est prise en compte (voir `src/prompts/qa-engineer.md` et `detectQAVerdict` dans `src/pipeline-detection.ts`). Les synonymes d’approbation (LGTM, « OK pour merge », etc.) et la valeur machine **`REQUEST_CHANGES`** sont reconnus. Le contexte **branche** et `run-context.json` est injecté comme pour l’audit sécurité.
+
+En **`pipeline next`** (exécution ticket), si l’issue possède dans `backlog.json` les champs **`architectureVision`** et/ou **`reflectionChallenge`** (souvent remplis après `--pipeline backlog` forward / backward), le QA reçoit aussi ces blocs en contexte, en plus du handoff architecte de l’exécution et de la sortie développeur, pour conserver la trace produit / red team liée à l’issue.
 
 Le pipeline s'arrête à chaque **checkpoint** pour ta validation
 (via les hooks Cursor).
