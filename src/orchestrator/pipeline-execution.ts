@@ -314,10 +314,20 @@ export async function fullPipeline(
       extractHandoffSection(reflectionChallenge, "## Handoff Dev — Produit") ||
       (reflectionChallenge ? trimContext(reflectionChallenge, 1000) : "");
 
+    // Pour size S (pas d'architecte dans ce run), récupérer les champs backlog
+    const backlogArchCtx =
+      !architectureVision && opts.executionIssueBacklogFields?.architectureVision
+        ? `## Contexte architecture (backlog)\n${opts.executionIssueBacklogFields.architectureVision}`
+        : "";
+    const backlogRedteamCtx =
+      !reflectionChallenge && opts.executionIssueBacklogFields?.reflectionChallenge
+        ? `## Challenge backlog\n${opts.executionIssueBacklogFields.reflectionChallenge}`
+        : "";
+
     const devContext = [
       `## Brief d'origine\n${brief}`,
-      archHandoff || null,
-      redteamHandoff || null,
+      archHandoff || backlogArchCtx || null,
+      redteamHandoff || backlogRedteamCtx || null,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -370,6 +380,7 @@ export async function fullPipeline(
               session,
               extractHandoffSection(implementation, "## Handoff Security & QA") || trimContext(implementation, 2000),
               detectedPrUrl,
+              trimContext(brief, 800),
             ),
             cloud: true,
             frugal,
@@ -497,6 +508,7 @@ export async function fullPipeline(
             session,
             extractHandoffSection(implementation, "## Handoff Security & QA") || trimContext(implementation, 2000),
             detectedPrUrl,
+            trimContext(brief, 800),
           ),
           cloud: true,
           frugal,

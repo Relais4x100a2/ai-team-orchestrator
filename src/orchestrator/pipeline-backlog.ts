@@ -3,7 +3,7 @@ import { resolve } from "path";
 import type { IssueSize } from "../backlog.js";
 import { generateIssueId, parsePMOutput } from "../backlog.js";
 import { checkFrugalMode } from "../spend-guard.js";
-import { formatDataDirPath, mkdirWithDefaultGitignoreIfNeeded, previewText, REPO_ROOT } from "./paths-and-env.js";
+import { extractHandoffSection, formatDataDirPath, mkdirWithDefaultGitignoreIfNeeded, previewText, REPO_ROOT } from "./paths-and-env.js";
 import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
 import { runAgent, resolveCloudMode } from "./agent-runner.js";
 import { migrateLegacySecurityFile, resolveLastRunDir } from "./run-context.js";
@@ -157,8 +157,10 @@ export async function pipelineBacklogReflection(
 
   const backlog = loadBacklog(session);
   const now = new Date().toISOString();
-  const architectureSummary = previewText(architecture, 500);
-  const reflectionSummary = previewText(reflection, 500);
+  const architectureSummary =
+    extractHandoffSection(architecture, "## Handoff Dev — Architecture") || previewText(architecture, 500);
+  const reflectionSummary =
+    extractHandoffSection(reflection, "## Handoff Dev — Produit") || previewText(reflection, 500);
 
   for (const parsed of parsedIssues) {
     const existing = backlog.issues.find((i) => i.title.trim().toLowerCase() === parsed.title.trim().toLowerCase());

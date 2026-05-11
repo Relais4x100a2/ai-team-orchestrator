@@ -6,6 +6,7 @@ export function buildSecurityImplementationContext(
   session: OrchestratorSession,
   implementationMarkdown: string,
   detectedPrUrl?: string,
+  issueDescription?: string,
 ): string {
   const repo = session.activeProject?.repo?.trim() || process.env.TARGET_REPO_URL?.trim() || "—";
   const branch = session.activeProject?.branch?.trim() || process.env.TARGET_BRANCH?.trim() || "—";
@@ -29,6 +30,7 @@ export function buildSecurityImplementationContext(
     "",
     "**Consigne** : audite le code et le diff de **cette branche / cette PR** dans l'environnement cloud Cursor. Si le workspace local ne reflète pas cette branche, indique-le dans le rapport mais base ton verdict sur **l'arbre distant** aligné avec la cible ci-dessus.",
     "",
+    ...(issueDescription ? ["## Issue auditée", "", issueDescription, ""] : []),
     "## Sortie développeur / contexte implémentation",
     "",
     implementationMarkdown,
