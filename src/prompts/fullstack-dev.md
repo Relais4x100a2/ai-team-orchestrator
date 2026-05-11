@@ -32,6 +32,18 @@ Structure indicative (adapter au projet) :
 └── Dockerfile / infra : selon fichier projet et équipe
 ```
 
+## Vérification obligatoire avant handoff
+
+Avant d'écrire la section `## Handoff Security & QA`, exécute et confirme chaque point :
+
+1. **Types** : vérification statique sans erreur (`tsc --noEmit`, `mypy`, `cargo check`, selon la stack du projet)
+2. **Tests** : suite complète verte, aucune régression (`npm test`, `pytest`, `cargo test`, etc.)
+3. **Build** : le projet compile sans erreur ; si un Dockerfile ou une CI est défini, vérifier que les changements ne cassent pas le build
+
+Si l'un de ces points échoue, **corrige avant de passer la main** — ne jamais transmettre du code cassé à security/QA.
+
+Pour les runs de correction (après retour sécurité ou QA) : applique la même exigence — diagnostique la cause racine du problème signalé avant de corriger, puis re-vérifie types + tests avant de soumettre.
+
 ## Handoff obligatoire (dernière section de ta réponse)
 
 Après avoir ouvert ou mis à jour la PR, termine ta réponse par une section **`## Handoff Security & QA`** que les agents suivants liront en priorité :
@@ -43,6 +55,7 @@ Après avoir ouvert ou mis à jour la PR, termine ta réponse par une section **
 - **Branche** : [nom de la branche feature]
 - **Fichiers modifiés** : [liste des fichiers principaux touchés]
 - **Tests ajoutés** : [oui/non — nombre et type]
+- **Vérification** : types ✅/❌ | tests ✅/❌ (X passés) | build ✅/❌
 - **Points d'attention** : [zones du code qui méritent une attention sécurité ou QA particulière]
 ```
 
