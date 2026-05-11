@@ -127,6 +127,7 @@ export async function pipelineNext(session: OrchestratorSession): Promise<void> 
       resumeFrom: executionStart,
       mode: "execution",
       startReason: `routing pipeline next (taille ${issue.size})`,
+      executionIssueInfo: { id: issue.id, title: issue.title, priority: issue.priority, size: issue.size },
       executionIssueBacklogFields:
         issue.architectureVision || issue.reflectionChallenge
           ? {
@@ -179,6 +180,7 @@ export async function fullPipeline(
       architectureVision?: string;
       reflectionChallenge?: string;
     };
+    executionIssueInfo?: { id: string; title: string; priority: string; size: string };
   } = {},
 ): Promise<void> {
   const isExecutionOnly = opts.mode === "execution";
@@ -187,6 +189,9 @@ export async function fullPipeline(
   const startIdx = PIPELINE_STEPS.indexOf(resumeFrom);
   const runId = opts.pipelineRunId ?? newPipelineRunId();
   const startedAt = new Date().toISOString();
+  const issueLabel = opts.executionIssueInfo
+    ? `[${opts.executionIssueInfo.id}] "${opts.executionIssueInfo.title}"`
+    : null;
 
   let frugal = await checkFrugalMode(process.env);
   if (frugal) {
@@ -300,10 +305,10 @@ export async function fullPipeline(
     }
 
     const devContext = [
-      `## Brief d'origine\n${brief}`,
-      specs !== brief ? `## Backlog formalisé\n${specs}` : null,
-      architectureVision ? `## Vision architecture\n${architectureVision}` : null,
-      reflectionChallenge ? `## Challenge produit/architecture\n${reflectionChallenge}` : null,
+      `## Brief d'origine\n${trimContext(brief, 5000)}`,
+      specs !== brief ? `## Backlog formalisé\n${trimContext(specs, 5000)}` : null,
+      architectureVision ? `## Vision architecture\n${trimContext(architectureVision, 4000)}` : null,
+      reflectionChallenge ? `## Challenge produit/architecture\n${trimContext(reflectionChallenge, 2000)}` : null,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -318,7 +323,9 @@ export async function fullPipeline(
         ? await runAgent(
             session,
             "dev",
-            "Implémente les fonctionnalités du backlog Must/Should en respectant la vision architecture et ouvre/met à jour la PR.",
+            issueLabel
+              ? `Implémente ${issueLabel} en respectant la vision architecture. Crée ou met à jour la PR.`
+              : "Implémente les fonctionnalités du backlog Must/Should en respectant la vision architecture et ouvre/met à jour la PR.",
             { additionalContext: devContext, cloud: true, autoCreatePR: true, frugal, issueSize: pipelineIssueSize },
           )
         : brief;
@@ -337,15 +344,17 @@ export async function fullPipeline(
 
         const securityPrompt =
           securityIteration === 1
-            ? "Audite la PR pour les vulnérabilités de sécurité."
-            : `Re-audite après corrections.\n\nRapport précédent sécurité :\n${trimContext(securityReport, 1500)}`;
+            ? issueLabel
+              ? `Audite la PR pour ${issueLabel}.`
+              : "Audite la PR pour les vulnérabilités de sécurité."
+            : `Re-audite après corrections.\n\nRapport précédent sécurité :\n${trimContext(securityReport, 2000)}`;
 
         securityReport = await runAgent(
           session,
           "security",
           securityPrompt,
           {
-            additionalContext: buildSecurityImplementationContext(session, trimContext(implementation, 2000)),
+            additionalContext: buildSecurityImplementationContext(session, trimContext(implementation, 6000)),
             cloud: true,
             frugal,
             issueSize: pipelineIssueSize,
@@ -363,7 +372,7 @@ export async function fullPipeline(
           implementation = await runAgent(
             session,
             "dev",
-            `Corrige les vulnérabilités critiques signalées par la sécurité.\n\n${trimContext(securityReport, 2000)}`,
+            `Corrige les vulnérabilités critiques signalées par la sécurité.\n\n${trimContext(securityReport, 4000)}`,
             {
               additionalContext: devContext,
               cloud: true,
@@ -395,8 +404,10 @@ export async function fullPipeline(
 
       const qaPrompt =
         qaIteration === 1
-          ? "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité au backlog."
-          : `Re-review la PR après les changements du développeur.\n\nVoici le rapport précédent de QA :\n${trimContext(qaReport, 2000)}\n\nVérifie si les problèmes identifiés ont été correctement adressés.`;
+          ? issueLabel
+            ? `Review la PR pour ${issueLabel}. Vérifie le code, les tests et la conformité aux critères d'acceptation.`
+            : "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité au backlog."
+          : `Re-review la PR après les changements du développeur.\n\nVoici le rapport précédent de QA :\n${trimContext(qaReport, 3000)}\n\nVérifie si les problèmes identifiés ont été correctement adressés.`;
 
       qaReport = await runAgent(
         session,
@@ -406,11 +417,13 @@ export async function fullPipeline(
           additionalContext: buildQAPipelineContext(
             session,
             [
-              `## Backlog formalisé\n${trimContext(specs, 4000)}`,
-              architectureVision ? `## Vision architecture\n${trimContext(architectureVision, 1500)}` : null,
+              isExecutionOnly
+                ? `## Issue implémentée\n${trimContext(brief, 3000)}`
+                : `## Backlog formalisé\n${trimContext(specs, 4000)}`,
+              architectureVision ? `## Vision architecture\n${trimContext(architectureVision, 2000)}` : null,
               reflectionChallenge ? `## Challenge amont\n${trimContext(reflectionChallenge, 1000)}` : null,
-              securityReport ? `## Rapport sécurité\n${trimContext(securityReport, 1200)}` : null,
-              `## Implémentation\n${trimContext(implementation, 2000)}`,
+              securityReport ? `## Rapport sécurité\n${trimContext(securityReport, 1500)}` : null,
+              `## Implémentation\n${trimContext(implementation, 4000)}`,
             ]
               .filter(Boolean)
               .join("\n\n"),
@@ -441,7 +454,7 @@ export async function fullPipeline(
       implementation = await runAgent(
         session,
         "dev",
-        `Corrige les problèmes soulevés par QA dans la revue précédente :\n\n${trimContext(qaReport, 2000)}\n\nMet à jour la PR avec les changements.`,
+        `Corrige les problèmes soulevés par QA dans la revue précédente :\n\n${trimContext(qaReport, 4000)}\n\nMet à jour la PR avec les changements.`,
         {
           additionalContext: devContext,
           cloud: true,
@@ -456,7 +469,7 @@ export async function fullPipeline(
         "security",
         "Re-vérifie rapidement les impacts sécurité après corrections demandées par QA.",
         {
-          additionalContext: buildSecurityImplementationContext(session, trimContext(implementation, 2000)),
+          additionalContext: buildSecurityImplementationContext(session, trimContext(implementation, 6000)),
           cloud: true,
           frugal,
           issueSize: pipelineIssueSize,
@@ -470,7 +483,7 @@ export async function fullPipeline(
         implementation = await runAgent(
           session,
           "dev",
-          `Corrige les vulnérabilités critiques apparues après corrections QA :\n\n${trimContext(securityAfterQaFix, 1500)}`,
+          `Corrige les vulnérabilités critiques apparues après corrections QA :\n\n${trimContext(securityAfterQaFix, 3000)}`,
           {
             additionalContext: devContext,
             cloud: true,

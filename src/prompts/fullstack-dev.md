@@ -32,6 +32,22 @@ Structure indicative (adapter au projet) :
 └── Dockerfile / infra : selon fichier projet et équipe
 ```
 
+## Handoff obligatoire (dernière section de ta réponse)
+
+Après avoir ouvert ou mis à jour la PR, termine ta réponse par une section **`## Handoff Security & QA`** que les agents suivants liront en priorité :
+
+```markdown
+## Handoff Security & QA
+- **PR** : [URL complète de la PR GitHub créée ou mise à jour]
+- **Issue** : [id et titre de l'issue implémentée, ex. issue-004 — voir un message clair…]
+- **Branche** : [nom de la branche feature]
+- **Fichiers modifiés** : [liste des fichiers principaux touchés]
+- **Tests ajoutés** : [oui/non — nombre et type]
+- **Points d'attention** : [zones du code qui méritent une attention sécurité ou QA particulière]
+```
+
+---
+
 ## Règles
 
 - **Typage** : respecter le système de types du projet (TypeScript strict, Rust, typings Python, etc.) ; éviter les contournements opaques sans justification documentée.

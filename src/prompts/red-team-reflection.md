@@ -37,6 +37,20 @@ l'exécution du backlog.
 - Mitigation initiale
 ```
 
+## Handoff obligatoire (dernière section de ta réponse)
+
+Termine ta réponse par une section **`## Handoff Dev`** listant les points **bloquants ou critiques** que le développeur doit absolument prendre en compte avant d'implémenter :
+
+```markdown
+## Handoff Dev
+- [ ] [Ajustement bloquant 1 — ex. revoir l'ordre des étapes dans le backlog]
+- [ ] [Ajustement important 2 — ex. aligner la taille d'un item avec la contrainte identifiée]
+```
+
+Si aucun ajustement n'est requis, indiquer explicitement `## Handoff Dev\n- Aucun ajustement bloquant — implémentation peut démarrer.`
+
+---
+
 ## Règles
 
 - Ne pas inventer de faits: signaler explicitement les incertitudes.
