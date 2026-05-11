@@ -32,6 +32,19 @@ Structure indicative (adapter au projet) :
 └── Dockerfile / infra : selon fichier projet et équipe
 ```
 
+## Cycle TDD (tailles M/L/XL)
+
+Pour toute logique métier non triviale, respecte le cycle **RED → GREEN → REFACTOR** :
+
+1. **RED** — écris le test minimal décrivant le comportement attendu, puis vérifie qu'il **échoue** (comportement absent, pas une erreur de syntaxe)
+2. **GREEN** — implémente le code le plus simple possible pour faire passer ce test, rien de plus
+3. **REFACTOR** — nettoie (nommage, duplication) sans ajouter de comportement ; vérifie que les tests restent verts
+
+**Règle absolue** : aucun code de production sans un test qui échoue d'abord. Si tu as commencé à coder avant d'écrire le test, supprime le code et recommence depuis le test.
+
+Taille **S** : cycle allégé toléré pour les comportements triviaux.  
+Taille **M/L/XL** : cycle TDD obligatoire pour toute logique métier.
+
 ## Vérification obligatoire avant handoff
 
 Avant d'écrire la section `## Handoff Security & QA`, exécute et confirme chaque point :

@@ -13,8 +13,14 @@ import { checkFrugalMode } from "../spend-guard.js";
 import type { PipelineRunStatus } from "../models.js";
 import { newPipelineRunId } from "../models.js";
 import { buildQAPipelineContext, buildSecurityImplementationContext } from "./context-builders.js";
-import { extractHandoffSection, formatErrorMessage, trimContext } from "./paths-and-env.js";
-import { detectGitHubPrUrl } from "./run-context.js";
+import {
+  extractHandoffSection,
+  formatErrorMessage,
+  isDevPipelineOutputTooWeak,
+  trimContext,
+  warnIfHandoffFallback,
+} from "./paths-and-env.js";
+import { detectGitHubPrUrl, loadLastRunContext, resolveLastRunDir } from "./run-context.js";
 import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
 import { runAgent, resolveCloudMode } from "./agent-runner.js";
 import { runArchitectForBacklogReflection } from "./pipeline-backlog.js";
@@ -36,6 +42,38 @@ function githubPipelineCloseComment(issue: BacklogIssue): string {
     `- Backlog id : \`${issue.id}\``,
     `- pipelineRun : \`${issue.pipelineRun ?? "—"}\``,
   ].join("\n");
+}
+
+function resolvePrUrlForDevOutputGate(
+  session: OrchestratorSession,
+  implementation: string,
+  detectedPrUrl: string | undefined,
+): string | undefined {
+  const fromText = detectGitHubPrUrl(implementation);
+  if (fromText) return fromText;
+  const fromArg = detectedPrUrl?.trim();
+  if (fromArg) return fromArg;
+  if (session.activeProjectSlug) {
+    const ctx = loadLastRunContext(resolveLastRunDir(session));
+    const u = ctx?.latestPrUrl?.trim();
+    if (u) return u;
+  }
+  return undefined;
+}
+
+/** Évite sécurité / QA sur une sortie dev vide ou sans PR ni handoff exploitable. */
+function assertDevOutputSufficientForSecurityAndQA(
+  session: OrchestratorSession,
+  implementation: string,
+  detectedPrUrl: string | undefined,
+  label: string,
+): void {
+  const pr = resolvePrUrlForDevOutputGate(session, implementation, detectedPrUrl);
+  if (!isDevPipelineOutputTooWeak(implementation, { prUrl: pr })) return;
+  const msg =
+    "Sortie développeur insuffisante pour enchaîner sécurité / QA : texte quasi vide, pas de section «## Handoff Security & QA» exploitable, aucune URL de PR dans la sortie ni dans run-context.json. Vérifier l'agent dev ou relancer.";
+  console.error(`❌ ${label}\n   ${msg}`);
+  throw new Error(msg);
 }
 
 async function runArchitectForTicketExecution(
@@ -307,12 +345,15 @@ export async function fullPipeline(
       console.log("\n🧠 ÉTAPE 3/6 — Red Team Réflexion : ⏭  ignoré (--resume-from)");
     }
 
+    const archExtract = extractHandoffSection(architectureVision, "## Handoff Dev — Architecture");
+    warnIfHandoffFallback("Vision architecture (étape architecte)", architectureVision, "## Handoff Dev — Architecture", archExtract);
     const archHandoff =
-      extractHandoffSection(architectureVision, "## Handoff Dev — Architecture") ||
-      (architectureVision ? trimContext(architectureVision, 1500) : "");
+      archExtract || (architectureVision ? trimContext(architectureVision, 1500) : "");
+
+    const redteamExtract = extractHandoffSection(reflectionChallenge, "## Handoff Dev — Produit");
+    warnIfHandoffFallback("Red team réflexion", reflectionChallenge, "## Handoff Dev — Produit", redteamExtract);
     const redteamHandoff =
-      extractHandoffSection(reflectionChallenge, "## Handoff Dev — Produit") ||
-      (reflectionChallenge ? trimContext(reflectionChallenge, 1000) : "");
+      redteamExtract || (reflectionChallenge ? trimContext(reflectionChallenge, 1000) : "");
 
     // Pour size S (pas d'architecte dans ce run), récupérer les champs backlog
     const backlogArchCtx =
@@ -371,6 +412,21 @@ export async function fullPipeline(
               : "Audite la PR pour les vulnérabilités de sécurité."
             : `Re-audite après corrections.\n\nRapport précédent sécurité :\n${trimContext(securityReport, 2000)}`;
 
+        assertDevOutputSufficientForSecurityAndQA(
+          session,
+          implementation,
+          detectedPrUrl,
+          `Garde-fou avant sécurité (itération ${securityIteration}/${maxSecurityIterations})`,
+        );
+
+        const implHandoffSecurity = extractHandoffSection(implementation, "## Handoff Security & QA");
+        warnIfHandoffFallback(
+          `Sortie développeur (→ sécurité, itération ${securityIteration})`,
+          implementation,
+          "## Handoff Security & QA",
+          implHandoffSecurity,
+        );
+
         securityReport = await runAgent(
           session,
           "security",
@@ -378,7 +434,7 @@ export async function fullPipeline(
           {
             additionalContext: buildSecurityImplementationContext(
               session,
-              extractHandoffSection(implementation, "## Handoff Security & QA") || trimContext(implementation, 2000),
+              implHandoffSecurity || trimContext(implementation, 2000),
               detectedPrUrl,
               trimContext(brief, 800),
             ),
@@ -399,7 +455,7 @@ export async function fullPipeline(
           implementation = await runAgent(
             session,
             "dev",
-            `Corrige les vulnérabilités critiques signalées par la sécurité.\n\n${trimContext(securityReport, 4000)}`,
+            `Correction sécurité — avant de modifier le code :\n1. Identifie la cause racine précise de chaque vulnérabilité (fichier, ligne, mécanisme fautif)\n2. Formule une hypothèse : "La cause est X parce que Y"\n3. Implémente la correction minimale ciblant cette cause, pas un patch sur le symptôme\n\nRapport sécurité :\n${trimContext(securityReport, 4000)}`,
             {
               additionalContext:
                 devContext +
@@ -425,6 +481,21 @@ export async function fullPipeline(
       }
     }
 
+    const qaIssueBacklogSections: string[] = [];
+    if (isExecutionOnly && opts.executionIssueBacklogFields) {
+      const f = opts.executionIssueBacklogFields;
+      if (f.architectureVision?.trim()) {
+        qaIssueBacklogSections.push(
+          `## Vision architecture (issue backlog)\n\n${trimContext(f.architectureVision.trim(), 2000)}`,
+        );
+      }
+      if (f.reflectionChallenge?.trim()) {
+        qaIssueBacklogSections.push(
+          `## Challenge produit / red team (issue backlog)\n\n${trimContext(f.reflectionChallenge.trim(), 2000)}`,
+        );
+      }
+    }
+
     let qaApproved = false;
     const maxQAIterations = 3;
     let qaReport = "";
@@ -441,6 +512,21 @@ export async function fullPipeline(
             : "Review la PR créée par le développeur. Vérifie le code, les tests, et la conformité au backlog."
           : `Re-review la PR après les changements du développeur.\n\nVoici le rapport précédent de QA :\n${trimContext(qaReport, 3000)}\n\nVérifie si les problèmes identifiés ont été correctement adressés.`;
 
+      assertDevOutputSufficientForSecurityAndQA(
+        session,
+        implementation,
+        detectedPrUrl,
+        `Garde-fou avant QA (itération ${qaIteration}/${maxQAIterations})`,
+      );
+
+      const implHandoffQa = extractHandoffSection(implementation, "## Handoff Security & QA");
+      warnIfHandoffFallback(
+        `Sortie développeur (→ QA, itération ${qaIteration})`,
+        implementation,
+        "## Handoff Security & QA",
+        implHandoffQa,
+      );
+
       qaReport = await runAgent(
         session,
         "qa",
@@ -450,9 +536,10 @@ export async function fullPipeline(
             session,
             [
               `## Issue implémentée\n${brief}`,
+              ...qaIssueBacklogSections,
               archHandoff || null,
               securityReport ? `## Rapport sécurité\n${trimContext(securityReport, 1500)}` : null,
-              `## Implémentation\n${extractHandoffSection(implementation, "## Handoff Security & QA") || trimContext(implementation, 2000)}`,
+              `## Implémentation\n${implHandoffQa || trimContext(implementation, 2000)}`,
             ]
               .filter(Boolean)
               .join("\n\n"),
@@ -484,7 +571,7 @@ export async function fullPipeline(
       implementation = await runAgent(
         session,
         "dev",
-        `Corrige les problèmes soulevés par QA dans la revue précédente :\n\n${trimContext(qaReport, 4000)}\n\nMet à jour la PR avec les changements.`,
+        `Correction QA — avant de modifier le code :\n1. Identifie la cause précise de chaque problème (fichier, comportement actuel vs attendu)\n2. Implémente la correction minimale ciblant chaque cause identifiée\n3. Met à jour la PR\n\nRapport QA :\n${trimContext(qaReport, 4000)}`,
         {
           additionalContext:
             devContext +
@@ -499,6 +586,21 @@ export async function fullPipeline(
       );
       detectedPrUrl = detectGitHubPrUrl(implementation) ?? detectedPrUrl;
 
+      assertDevOutputSufficientForSecurityAndQA(
+        session,
+        implementation,
+        detectedPrUrl,
+        "Garde-fou avant sécurité (après correction demandée par QA)",
+      );
+
+      const implHandoffSecurityPostQa = extractHandoffSection(implementation, "## Handoff Security & QA");
+      warnIfHandoffFallback(
+        "Sortie développeur (→ sécurité après correction QA)",
+        implementation,
+        "## Handoff Security & QA",
+        implHandoffSecurityPostQa,
+      );
+
       const securityAfterQaFix = await runAgent(
         session,
         "security",
@@ -506,7 +608,7 @@ export async function fullPipeline(
         {
           additionalContext: buildSecurityImplementationContext(
             session,
-            extractHandoffSection(implementation, "## Handoff Security & QA") || trimContext(implementation, 2000),
+            implHandoffSecurityPostQa || trimContext(implementation, 2000),
             detectedPrUrl,
             trimContext(brief, 800),
           ),
@@ -523,7 +625,7 @@ export async function fullPipeline(
         implementation = await runAgent(
           session,
           "dev",
-          `Corrige les vulnérabilités critiques apparues après corrections QA :\n\n${trimContext(securityAfterQaFix, 3000)}`,
+          `Correction sécurité (post-QA) — avant de modifier le code :\n1. Identifie la cause racine précise de chaque vulnérabilité (fichier, ligne, mécanisme fautif)\n2. Formule une hypothèse : "La cause est X parce que Y"\n3. Implémente la correction minimale ciblant cette cause, pas un patch sur le symptôme\n\nRapport sécurité :\n${trimContext(securityAfterQaFix, 3000)}`,
           {
             additionalContext:
               devContext +
