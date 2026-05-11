@@ -455,7 +455,7 @@ export async function fullPipeline(
           implementation = await runAgent(
             session,
             "dev",
-            `Correction sécurité — avant de modifier le code :\n1. Identifie la cause racine précise de chaque vulnérabilité (fichier, ligne, mécanisme fautif)\n2. Formule une hypothèse : "La cause est X parce que Y"\n3. Implémente la correction minimale ciblant cette cause, pas un patch sur le symptôme\n\nRapport sécurité :\n${trimContext(securityReport, 4000)}`,
+            `Corrige les vulnérabilités critiques signalées par la sécurité.\n\n${trimContext(securityReport, 4000)}`,
             {
               additionalContext:
                 devContext +
@@ -571,7 +571,7 @@ export async function fullPipeline(
       implementation = await runAgent(
         session,
         "dev",
-        `Correction QA — avant de modifier le code :\n1. Identifie la cause précise de chaque problème (fichier, comportement actuel vs attendu)\n2. Implémente la correction minimale ciblant chaque cause identifiée\n3. Met à jour la PR\n\nRapport QA :\n${trimContext(qaReport, 4000)}`,
+        `Corrige les problèmes soulevés par QA dans la revue précédente :\n\n${trimContext(qaReport, 4000)}\n\nMet à jour la PR avec les changements.`,
         {
           additionalContext:
             devContext +
@@ -625,7 +625,7 @@ export async function fullPipeline(
         implementation = await runAgent(
           session,
           "dev",
-          `Correction sécurité (post-QA) — avant de modifier le code :\n1. Identifie la cause racine précise de chaque vulnérabilité (fichier, ligne, mécanisme fautif)\n2. Formule une hypothèse : "La cause est X parce que Y"\n3. Implémente la correction minimale ciblant cette cause, pas un patch sur le symptôme\n\nRapport sécurité :\n${trimContext(securityAfterQaFix, 3000)}`,
+          `Corrige les vulnérabilités critiques apparues après corrections QA :\n\n${trimContext(securityAfterQaFix, 3000)}`,
           {
             additionalContext:
               devContext +

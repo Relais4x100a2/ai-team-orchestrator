@@ -7,6 +7,8 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
 
 **Pipeline par défaut (`full`) :** PM → architecte → red team réflexion → dev ⇄ sécurité ⇄ QA (sécurité avant QA, variante A).
 
+**Pipeline backlog (`--pipeline backlog` forward | backward) :** les champs `architectureVision` et `reflectionChallenge` persistés dans `backlog.json` sur les issues MUST/SHOULD sont **une paire unique par run**, répliée sur **tout le batch** d’issues produit par le parse de la synthèse PM — cadre transverse du run, pas un résumé par story. Le détail par ticket vit dans `description` et le brief d’exécution (`pipeline next`).
+
 **Agents hors pipeline `full` (invocation manuelle)** : `ux`, `ui`, `devops`, `sre`, `release`, `techwriter`, `privacy` — même injection de contexte que les autres agents quand `--project` est utilisé.
 
 ## Stack

@@ -242,6 +242,8 @@ npm run project -- monprojet --pipeline backlog forward "Vision produit cible"
 npm run project -- monprojet --pipeline backlog backward "Retours utilisateurs et testeurs"
 ```
 
+**Champs `architectureVision` / `reflectionChallenge` (choix produit) :** à chaque run `backlog forward` ou `backlog backward`, l’orchestrateur calcule **une seule** paire de résumés à partir des sorties architecte et red team réflexion (handoff attendu ou extrait court si le marqueur manque). Cette **même paire** est ensuite écrite sur **toutes** les issues **MUST** et **SHOULD** du lot issu du parse de la synthèse PM finale — ce sont des rappels du **cadre transverse de ce run**, pas des résumés distincts générés par ticket. La granularité propre à une story reste dans sa `description` et, à l’exécution, dans le brief / `pipeline next`.
+
 ### Mode pipeline next (partie 2)
 
 `pipeline next` exécute uniquement la partie exécution backlog -> QA:
