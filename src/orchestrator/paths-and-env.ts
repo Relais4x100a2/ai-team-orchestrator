@@ -25,6 +25,12 @@ export function trimContext(text: string, maxChars: number): string {
   return text.slice(0, maxChars) + "\n\n[…tronqué]";
 }
 
+/** Extrait une section Handoff depuis la fin d'un texte agent. Retourne "" si le marqueur est absent. */
+export function extractHandoffSection(text: string, marker: string): string {
+  const idx = text.indexOf(marker);
+  return idx >= 0 ? text.slice(idx).trim() : "";
+}
+
 export function resolveUserPath(inputPath: string): { absolutePath: string; displayPath: string } {
   const trimmed = inputPath.trim();
   if (!trimmed) throw new Error("Chemin vide.");

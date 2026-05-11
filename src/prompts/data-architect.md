@@ -48,10 +48,10 @@ Entité: NomEntité
 
 ## Handoff obligatoire (dernière section de ta réponse)
 
-Quelle que soit la tâche (réflexion backlog ou exécution ticket), termine ta réponse par une section **`## Handoff Dev`** contenant **3 à 5 points concis** :
+Quelle que soit la tâche (réflexion backlog ou exécution ticket), termine ta réponse par une section **`## Handoff Dev — Architecture`** contenant **3 à 5 points concis** :
 
 ```markdown
-## Handoff Dev
+## Handoff Dev — Architecture
 - **Contrainte 1** : [décision retenue ou limite à ne pas dépasser]
 - **Contrainte 2** : …
 - **Point d'attention** : [risque technique principal à surveiller pendant l'implémentation]

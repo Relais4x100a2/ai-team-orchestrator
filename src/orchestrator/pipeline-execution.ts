@@ -13,7 +13,7 @@ import { checkFrugalMode } from "../spend-guard.js";
 import type { PipelineRunStatus } from "../models.js";
 import { newPipelineRunId } from "../models.js";
 import { buildQAPipelineContext, buildSecurityImplementationContext } from "./context-builders.js";
-import { formatErrorMessage, trimContext } from "./paths-and-env.js";
+import { extractHandoffSection, formatErrorMessage, trimContext } from "./paths-and-env.js";
 import { detectGitHubPrUrl } from "./run-context.js";
 import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
 import { runAgent, resolveCloudMode } from "./agent-runner.js";
@@ -43,11 +43,13 @@ async function runArchitectForTicketExecution(
   specs: string,
   frugal: boolean,
   issueSize: IssueSize | undefined,
+  issueLabel?: string,
 ): Promise<string> {
   // Si pas de localPath, forcer cloud même si PIPELINE_ARCHITECT_CLOUD=false
   const useCloud = isPipelineArchitectCloud() || resolveCloudMode(session, "architect");
-  const task =
-    "Fournis un cadrage architecture ciblé pour sécuriser l'exécution de ce backlog item (contraintes, risques, points d'attention).";
+  const task = issueLabel
+    ? `Fournis un cadrage architecture ciblé pour ${issueLabel} (contraintes, risques, points d'attention).`
+    : "Fournis un cadrage architecture ciblé pour sécuriser l'exécution de ce backlog item (contraintes, risques, points d'attention).";
   let out = await runAgent(session, "architect", task, {
     additionalContext: specs,
     frugal,
@@ -281,7 +283,7 @@ export async function fullPipeline(
     if (startIdx <= 1) {
       console.log("\n🏛️  ÉTAPE 2/6 — Data Architect");
       if (isExecutionOnly) {
-        architectureVision = await runArchitectForTicketExecution(session, specs, frugal, pipelineIssueSize);
+        architectureVision = await runArchitectForTicketExecution(session, specs, frugal, pipelineIssueSize, issueLabel ?? undefined);
       } else {
         architectureVision = await runArchitectForBacklogReflection(session, specs, frugal, pipelineIssueSize);
       }
@@ -305,11 +307,17 @@ export async function fullPipeline(
       console.log("\n🧠 ÉTAPE 3/6 — Red Team Réflexion : ⏭  ignoré (--resume-from)");
     }
 
+    const archHandoff =
+      extractHandoffSection(architectureVision, "## Handoff Dev — Architecture") ||
+      (architectureVision ? trimContext(architectureVision, 1500) : "");
+    const redteamHandoff =
+      extractHandoffSection(reflectionChallenge, "## Handoff Dev — Produit") ||
+      (reflectionChallenge ? trimContext(reflectionChallenge, 1000) : "");
+
     const devContext = [
-      `## Brief d'origine\n${trimContext(brief, 5000)}`,
-      specs !== brief ? `## Backlog formalisé\n${trimContext(specs, 5000)}` : null,
-      architectureVision ? `## Vision architecture\n${trimContext(architectureVision, 4000)}` : null,
-      reflectionChallenge ? `## Challenge produit/architecture\n${trimContext(reflectionChallenge, 2000)}` : null,
+      `## Brief d'origine\n${brief}`,
+      archHandoff || null,
+      redteamHandoff || null,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -358,7 +366,11 @@ export async function fullPipeline(
           "security",
           securityPrompt,
           {
-            additionalContext: buildSecurityImplementationContext(session, trimContext(implementation, 6000), detectedPrUrl),
+            additionalContext: buildSecurityImplementationContext(
+              session,
+              extractHandoffSection(implementation, "## Handoff Security & QA") || trimContext(implementation, 2000),
+              detectedPrUrl,
+            ),
             cloud: true,
             frugal,
             issueSize: pipelineIssueSize,
@@ -378,7 +390,11 @@ export async function fullPipeline(
             "dev",
             `Corrige les vulnérabilités critiques signalées par la sécurité.\n\n${trimContext(securityReport, 4000)}`,
             {
-              additionalContext: devContext,
+              additionalContext:
+                devContext +
+                (implementation
+                  ? `\n\n## Implémentation précédente\n${trimContext(implementation, 3000)}`
+                  : ""),
               cloud: true,
               autoCreatePR: false,
               frugal,
@@ -422,13 +438,10 @@ export async function fullPipeline(
           additionalContext: buildQAPipelineContext(
             session,
             [
-              isExecutionOnly
-                ? `## Issue implémentée\n${trimContext(brief, 3000)}`
-                : `## Backlog formalisé\n${trimContext(specs, 4000)}`,
-              architectureVision ? `## Vision architecture\n${trimContext(architectureVision, 2000)}` : null,
-              reflectionChallenge ? `## Challenge amont\n${trimContext(reflectionChallenge, 1000)}` : null,
+              `## Issue implémentée\n${brief}`,
+              archHandoff || null,
               securityReport ? `## Rapport sécurité\n${trimContext(securityReport, 1500)}` : null,
-              `## Implémentation\n${trimContext(implementation, 4000)}`,
+              `## Implémentation\n${extractHandoffSection(implementation, "## Handoff Security & QA") || trimContext(implementation, 2000)}`,
             ]
               .filter(Boolean)
               .join("\n\n"),
@@ -462,7 +475,11 @@ export async function fullPipeline(
         "dev",
         `Corrige les problèmes soulevés par QA dans la revue précédente :\n\n${trimContext(qaReport, 4000)}\n\nMet à jour la PR avec les changements.`,
         {
-          additionalContext: devContext,
+          additionalContext:
+            devContext +
+            (implementation
+              ? `\n\n## Implémentation précédente\n${trimContext(implementation, 3000)}`
+              : ""),
           cloud: true,
           autoCreatePR: false,
           frugal,
@@ -476,7 +493,11 @@ export async function fullPipeline(
         "security",
         "Re-vérifie rapidement les impacts sécurité après corrections demandées par QA.",
         {
-          additionalContext: buildSecurityImplementationContext(session, trimContext(implementation, 6000), detectedPrUrl),
+          additionalContext: buildSecurityImplementationContext(
+            session,
+            extractHandoffSection(implementation, "## Handoff Security & QA") || trimContext(implementation, 2000),
+            detectedPrUrl,
+          ),
           cloud: true,
           frugal,
           issueSize: pipelineIssueSize,
@@ -492,7 +513,11 @@ export async function fullPipeline(
           "dev",
           `Corrige les vulnérabilités critiques apparues après corrections QA :\n\n${trimContext(securityAfterQaFix, 3000)}`,
           {
-            additionalContext: devContext,
+            additionalContext:
+              devContext +
+              (implementation
+                ? `\n\n## Implémentation précédente\n${trimContext(implementation, 3000)}`
+                : ""),
             cloud: true,
             autoCreatePR: false,
             frugal,
