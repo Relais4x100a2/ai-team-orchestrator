@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import type { AgentRole } from "../agent-config.js";
+import { buildGitHubTreeUrlForProject } from "../project-branch-url.js";
 import { formatDataDirPath, formatErrorMessage, LAST_RUN_BASE_DIR } from "./paths-and-env.js";
 import type { OrchestratorSession } from "./session.js";
 
@@ -60,11 +61,19 @@ export function loadLastRunContext(lastRunDir: string): LastRunContext | null {
   }
 }
 
+export type SaveLastRunContextOptions = {
+  /** Chemin relatif au `lastRunDir` (ex. `runs/<doc>/<issue>/dev.md`). */
+  outputRelativePath?: string;
+  /** Branche Git pour construire `latestBranchUrl` (prioritaire sur détection dans le texte). */
+  branchOverride?: string;
+};
+
 export function saveLastRunContext(
   session: OrchestratorSession,
   lastRunDir: string,
   role: AgentRole,
   contextText: string,
+  options?: SaveLastRunContextOptions,
 ): void {
   if (!session.activeProjectSlug) return;
   const previous = loadLastRunContext(lastRunDir);
@@ -74,10 +83,16 @@ export function saveLastRunContext(
         "Choisis un autre `project_data_dir` pour ce projet.",
     );
   }
-  const latestByRole = previous?.latestByRole ?? {};
-  latestByRole[role] = ROLE_OUTPUT_FILE[role];
+  const latestByRole = { ...(previous?.latestByRole ?? {}) };
+  latestByRole[role] = options?.outputRelativePath ?? ROLE_OUTPUT_FILE[role];
 
-  const branchUrl = detectGitHubBranchUrl(contextText) ?? previous?.latestBranchUrl;
+  let branchUrl = previous?.latestBranchUrl;
+  if (session.activeProject && options?.branchOverride?.trim()) {
+    const built = buildGitHubTreeUrlForProject(session.activeProject, options.branchOverride.trim());
+    if (built) branchUrl = built;
+  }
+  const fromText = detectGitHubBranchUrl(contextText);
+  if (fromText) branchUrl = fromText;
   const prUrl = detectGitHubPrUrl(contextText) ?? previous?.latestPrUrl;
 
   const nextContext: LastRunContext = {
@@ -86,6 +101,35 @@ export function saveLastRunContext(
     latestByRole,
     latestBranchUrl: branchUrl,
     latestPrUrl: prUrl,
+  };
+  writeFileSync(resolve(lastRunDir, LAST_RUN_CONTEXT_FILE), JSON.stringify(nextContext, null, 2), "utf-8");
+}
+
+/** Retire de `latestByRole` les chemins situés sous un préfixe (après suppression d’artefacts `runs/`). */
+export function saveLastRunContextPruneRunsPrefix(
+  session: OrchestratorSession,
+  lastRunDir: string,
+  pathPrefix: string,
+): void {
+  if (!session.activeProjectSlug) return;
+  const previous = loadLastRunContext(lastRunDir);
+  if (!previous?.latestByRole) return;
+  const latestByRole = { ...previous.latestByRole };
+  let changed = false;
+  for (const key of Object.keys(latestByRole) as AgentRole[]) {
+    const p = latestByRole[key];
+    if (typeof p === "string" && (p === pathPrefix || p.startsWith(pathPrefix))) {
+      delete latestByRole[key];
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  const nextContext: LastRunContext = {
+    updatedAt: new Date().toISOString(),
+    projectSlug: session.activeProjectSlug,
+    latestByRole,
+    latestBranchUrl: previous.latestBranchUrl,
+    latestPrUrl: previous.latestPrUrl,
   };
   writeFileSync(resolve(lastRunDir, LAST_RUN_CONTEXT_FILE), JSON.stringify(nextContext, null, 2), "utf-8");
 }

@@ -21,6 +21,9 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
   - `CURSOR_API_KEY` — obligatoire pour lancer les agents
   - `TARGET_REPO_URL`, `TARGET_BRANCH` — fallback si pas de `--project` (mode cloud)
   - `GITHUB_TOKEN` — pour `--sync-issues` (API Issues) et, si `GITHUB_CLOSE_ISSUE_ON_PIPELINE_DONE=1` (opt-in), fermeture automatique de l’issue GitHub après un `pipeline next` réussi (`src/github-sync.ts`, `src/orchestrator/workflows.ts`)
+  - `GITHUB_SYNC_BACKLOG_DOCUMENT_LABEL` — si `1`/`true`/`yes`, ajoute le label `backlog:<backlogDocumentId>` à la création d’issue GitHub (`--sync-issues`) ; défaut : corps d’issue uniquement (document id + chemin relatif vers `backlog.json`).
+  - `RUNS_CLEANUP_ON_ISSUE_DONE` — si `1`/`true`/`yes`, supprime après un `pipeline next` réussi le dossier `runs/<backlogDocumentId>/<issueId>/` sous le répertoire de données (opt-in, destruction d’artefacts).
+  - `RUNS_CLEANUP_ON_SKIPPED` — idem pour les issues passées en `skipped` si tu branches cette logique sur le nettoyage (`src/orchestrator/runs-cleanup.ts`).
   - `CURSOR_BILLING_MODE` — `solo` (défaut recommandé Pro/Pro+/Ultra) ou `team`.
   - `FRUGAL_DEFAULT` — override explicite (`true|false`) du mode frugal.
   - `SPEND_ALERT_CENTS` — seuil Team (centimes) ; au-delà, **mode frugal** : tous les agents utilisent `composer-2` (`src/spend-guard.ts`). Optionnel : `SPEND_CHECK_EMAIL` pour filtrer la dépense par utilisateur.
@@ -90,7 +93,8 @@ npm run agent:privacy
 
 | Option | Rôle |
 |--------|------|
-| `--project <fichier>` | Charge `projects/…`. Sorties agents + backlog : `last-run/<slug>/` sans `local_path` ; avec `local_path`, sous `<local_path>/<project_data_dir>/` (défaut `.ai-team-orchestrator`). |
+| `--project <fichier>` | Charge `projects/…`. `backlog.json` + `run-context.json` : `last-run/<slug>/` sans `local_path` ; avec `local_path`, sous `<local_path>/<project_data_dir>/` (défaut `.ai-team-orchestrator`). Sur **`pipeline next`**, les sorties agents d’exécution ticket sont sous `runs/<backlogDocumentId>/<issueId>/<role>.md` dans ce même répertoire. |
+| `--backlog-id <ULID>` | Vérifie que le fichier `backlog.json` chargé a ce `backlogDocumentId` (après migration automatique si besoin). |
 | `--brief-file <fichier>` | Brief ou tâche lus depuis un fichier (chemins relatifs au cwd ou absolus). Peut pointer vers `pm.md` du répertoire de données (orchestrateur ou dépôt cible). |
 | `--resume-from <étape>` | Reprend le pipeline : `pm` \| `architect` \| `redteam_reflection` \| `dev` \| `security` \| `qa`. Le brief fourni remplace le contexte des étapes ignorées. (`pipeline next` démarre par défaut en exécution: `dev` pour `S`, `architect` pour `M/L/XL`) |
 | `--sync-issues` | Crée les issues GitHub manquantes depuis `backlog.json`. Exige `--project` avec `repo:` dans le frontmatter et `GITHUB_TOKEN` dans `.env`. |
@@ -111,10 +115,13 @@ tsx src/orchestrator.ts --project projects/mon-projet.md --sync-issues
 
 - `src/orchestrator.ts` — Façade CLI (`dotenv`, `setupRipgrepPath`, `main()`)
 - `src/orchestrator/` — `fullPipeline`, `runAgent`, chargement projet / backlog, garde branche, sync git (`cli.ts`, `workflows.ts`, `agent-runner.ts`, …)
-- `src/orchestrator/session.ts` — Type `OrchestratorSession` + `emptyOrchestratorSession()` ; instance unique créée dans `cli.main()` et passée aux workflows et à `runAgent` (pas de singleton global mutable partagé entre modules).
+- `src/orchestrator/session.ts` — Type `OrchestratorSession` + `emptyOrchestratorSession()` (`cliBacklogDocumentId`, chemins `runs/`, branche backlog) ; instance unique créée dans `cli.main()` et passée aux workflows et à `runAgent`.
+- `src/orchestrator/backlog-io.ts` — Chemins `backlog.json`, migration `backlogDocumentId`, `resolveBacklogRelativePathForSync`.
+- `src/orchestrator/backlog-work-branch.ts` — Branche Git locale `backlog/<ULID>-<slug>` au `pipeline next` si `local_path`.
+- `src/orchestrator/runs-cleanup.ts` — Suppression opt-in des artefacts `runs/…/<issueId>/` après clôture.
 - `src/agent-config.ts` — `AGENT_DEFINITIONS`, `promptFile`, résolution des modèles (`createAgentConfig`)
 - `src/models.ts` — Types partagés (`ProjectContext`, backlog, pipeline runs, parsing JSON)
-- `src/backlog.ts` — Parse sortie PM + sélection prochaine issue (`pickNextIssue`)
+- `src/backlog.ts` — Réexport des types backlog (`models`) ; parse sortie PM + `pickNextIssue`, `themeSourceForWorkBranch`
 - `src/pipeline-detection.ts` — Heuristiques `detectQAVerdict` / `detectSecurityVerdict` (dernière ligne `VERDICT QA:` / `VERDICT:` pour le QA ; `VERDICT SÉCURITÉ:` pour la sécurité)
 - `src/pipeline-runs.ts` — Persistance des exécutions dans `pipeline-runs.json` (racine du repo)
 - `src/github-sync.ts` — Création des issues GitHub depuis le backlog (`--sync-issues`)
@@ -122,7 +129,7 @@ tsx src/orchestrator.ts --project projects/mon-projet.md --sync-issues
 - `src/verify-prompts.ts` — Vérif présence des fichiers prompts (CI + `npm run verify:prompts`)
 - `src/prompts/*.md` — Prompts système génériques (liste dans le tableau ci-dessus)
 - `projects/*.md` — Fichiers de contexte projet (frontmatter ; corps optionnel si contexte dans le dépôt cible)
-- Répertoire **de données** par projet — Avec `--project` : `last-run/<slug>/` (sans `local_path`) **ou** `<local_path>/.ai-team-orchestrator/` par défaut : `backlog.json`, `run-context.json`, `<role>.md`, `context.md` (contexte long optionnel), `.gitignore` auto à la création
+- Répertoire **de données** par projet — Avec `--project` : `last-run/<slug>/` (sans `local_path`) **ou** `<local_path>/.ai-team-orchestrator/` par défaut : `backlog.json` (champ `backlogDocumentId` ULID + option `themeLabel`), `run-context.json`, `runs/<id>/<issue>/` pendant l’exécution ticket, `context.md` (contexte long optionnel), `.gitignore` auto à la création. Les fichiers `<role>.md` à la racine du data dir restent possibles hors exécution `pipeline next`.
 - `pipeline-runs.json` — Journal des runs de `fullPipeline` (append)
 - `.cursor/mcp.json` — Serveurs MCP (Figma, GitHub)
 - `.cursor/hooks.json` — Hooks de supervision

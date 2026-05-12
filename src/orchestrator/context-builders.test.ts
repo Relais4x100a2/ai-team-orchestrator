@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ProjectContext } from "../models.js";
 import { buildQAPipelineContext, buildSecurityImplementationContext } from "./context-builders.js";
+import { emptyOrchestratorSession } from "./session.js";
 import type { OrchestratorSession } from "./session.js";
 
 describe("context-builders (prompts cloud)", () => {
@@ -13,6 +14,7 @@ describe("context-builders (prompts cloud)", () => {
       content: "",
     };
     const session: OrchestratorSession = {
+      ...emptyOrchestratorSession(),
       activeProject: project,
       activeProjectSlug: "slug",
     };
@@ -29,6 +31,7 @@ describe("context-builders (prompts cloud)", () => {
       content: "",
     };
     const session: OrchestratorSession = {
+      ...emptyOrchestratorSession(),
       activeProject: project,
       activeProjectSlug: "slug",
     };

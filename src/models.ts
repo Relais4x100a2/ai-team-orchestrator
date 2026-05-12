@@ -57,6 +57,20 @@ export interface Backlog {
   version: number;
   lastUpdated: string;
   issues: BacklogIssue[];
+  /**
+   * Identifiant stable du fichier backlog (ULID). Absent dans les JSON legacy :
+   * assigné automatiquement par `loadBacklog` (migration write-on-read).
+   */
+  backlogDocumentId?: string;
+  /** Libellé optionnel pour le slug de branche Git `backlog/<id>-<slug>`. */
+  themeLabel?: string;
+}
+
+/** Crockford base32 : 26 caractères (ULID). */
+const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
+
+export function isValidBacklogDocumentId(id: string): boolean {
+  return typeof id === "string" && ULID_RE.test(id.trim());
 }
 
 export interface ProjectContext {
@@ -256,7 +270,24 @@ export function parseBacklogJson(raw: unknown, sourceLabel = "backlog.json"): Ba
     ids.add(issue.id);
   }
 
-  return { version, lastUpdated, issues };
+  let backlogDocumentId: string | undefined;
+  if (o.backlogDocumentId !== undefined) {
+    if (typeof o.backlogDocumentId !== "string" || !isValidBacklogDocumentId(o.backlogDocumentId)) {
+      throw new Error(`${sourceLabel}.backlogDocumentId : ULID (26 caractères) obligatoire si présent`);
+    }
+    backlogDocumentId = o.backlogDocumentId.trim();
+  }
+
+  let themeLabel: string | undefined;
+  if (o.themeLabel !== undefined) {
+    if (typeof o.themeLabel !== "string") {
+      throw new Error(`${sourceLabel}.themeLabel : chaîne attendue`);
+    }
+    const t = o.themeLabel.trim();
+    themeLabel = t.length ? t : undefined;
+  }
+
+  return { version, lastUpdated, issues, backlogDocumentId, themeLabel };
 }
 
 /** Résout un chemin de brief : absolu normalisé ou relatif au cwd. */

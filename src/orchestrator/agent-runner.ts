@@ -1,4 +1,4 @@
-import { writeFileSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { Agent } from "@cursor/sdk";
 import {
@@ -93,7 +93,10 @@ export async function runAgent(
   requireRepoUrlForCloud(session, options.cloud);
 
   const repoUrl = resolveRepoUrl(session);
-  const branchRef = session.activeProject?.branch?.trim() || process.env.TARGET_BRANCH;
+  const branchRef =
+    session.backlogWorkBranch?.trim() ||
+    session.activeProject?.branch?.trim() ||
+    process.env.TARGET_BRANCH;
 
   if (!options.cloud && session.activeProject?.localPath) {
     console.log(`   Répertoire local : ${session.activeProject.localPath}`);
@@ -244,9 +247,18 @@ export async function runAgent(
           migrateLegacySecurityFile(lastRunDir);
         }
         const outputFile = ROLE_OUTPUT_FILE[role];
-        const outPath = resolve(lastRunDir, outputFile);
+        const relSub = session.agentOutputRelativeSubdir?.trim();
+        const outDir = relSub ? resolve(lastRunDir, relSub) : lastRunDir;
+        mkdirSync(outDir, { recursive: true });
+        const outPath = resolve(outDir, outputFile);
         writeFileSync(outPath, result, "utf-8");
-        saveLastRunContext(session, lastRunDir, role, [task, options.additionalContext, result].filter(Boolean).join("\n\n"));
+        const outputRelativePath = relSub
+          ? `${relSub.replace(/[/\\]+$/, "")}/${outputFile}`.split(/[/\\]+/).join("/")
+          : undefined;
+        saveLastRunContext(session, lastRunDir, role, [task, options.additionalContext, result].filter(Boolean).join("\n\n"), {
+          outputRelativePath,
+          branchOverride: session.backlogWorkBranch?.trim(),
+        });
         console.log(`\n   💾 Sortie sauvegardée : ${formatDataDirPath(outPath)}`);
       } catch (e) {
         console.error(`   ⚠️  Impossible de sauvegarder la sortie agent : ${(e as Error).message}`);

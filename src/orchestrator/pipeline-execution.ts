@@ -1,7 +1,13 @@
 import { PIPELINE_STEPS, type PipelineStep } from "../agent-config.js";
 import type { BacklogIssue, IssueSize } from "../backlog.js";
 import { pickNextIssue } from "../backlog.js";
-import { closeGitHubIssueWithComment, fetchIssueComments, formatIssueCommentsForBrief } from "../github-sync.js";
+import {
+  closeGitHubIssueWithComment,
+  fetchIssueComments,
+  formatIssueCommentsForBrief,
+  pullIssuesFromGitHub,
+  syncBacklogToGitHub,
+} from "../github-sync.js";
 import {
   detectQAVerdict,
   detectSecurityVerdict,
@@ -21,7 +27,14 @@ import {
   warnIfHandoffFallback,
 } from "./paths-and-env.js";
 import { detectGitHubPrUrl, loadLastRunContext, resolveLastRunDir } from "./run-context.js";
-import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
+import {
+  loadBacklog,
+  resolveBacklogRelativePathForSync,
+  saveBacklog,
+  printBacklogSummary,
+} from "./backlog-io.js";
+import { ensureBacklogWorkBranch } from "./backlog-work-branch.js";
+import { removeRunArtifactsForClosedIssue } from "./runs-cleanup.js";
 import { runAgent, resolveCloudMode } from "./agent-runner.js";
 import { runArchitectForBacklogReflection } from "./pipeline-backlog.js";
 import type { OrchestratorSession } from "./session.js";
@@ -36,10 +49,11 @@ function isGithubCloseIssueOnPipelineDoneEnabled(): boolean {
   return v === "1" || v === "true" || v === "yes";
 }
 
-function githubPipelineCloseComment(issue: BacklogIssue): string {
+function githubPipelineCloseComment(issue: BacklogIssue, backlogDocumentId?: string): string {
   return [
     "Fermé automatiquement après `pipeline next` réussi (ai-team-orchestrator).",
-    `- Backlog id : \`${issue.id}\``,
+    ...(backlogDocumentId ? [`- **Document backlog** : \`${backlogDocumentId}\``] : []),
+    `- Story backlog : \`${issue.id}\``,
     `- pipelineRun : \`${issue.pipelineRun ?? "—"}\``,
   ].join("\n");
 }
@@ -111,7 +125,47 @@ async function runArchitectForTicketExecution(
   return out;
 }
 
+/**
+ * Sync bidirectionnel GitHub ↔ backlog avant pipeline next.
+ * Pull (statuts fermés, labels) puis push (relinkage + création manquantes).
+ * Fail-open : avertissement uniquement si GitHub non configuré ou erreur réseau.
+ */
+async function syncGitHubIfConfigured(session: OrchestratorSession): Promise<void> {
+  const repo = session.activeProject?.repo?.trim();
+  const token = process.env.GITHUB_TOKEN?.trim();
+  if (!repo || !token) return;
+
+  console.log("\n🔄 Sync GitHub Issues ↔ backlog…");
+  const backlog = loadBacklog(session);
+  let changed = false;
+
+  try {
+    const pullResult = await pullIssuesFromGitHub(backlog, repo, token, { importNew: false });
+    if (pullResult.statusClosed) {
+      console.log(`   ✅ ${pullResult.statusClosed} issue(s) marquée(s) done (fermées sur GitHub)`);
+      changed = true;
+    }
+    if (pullResult.labelsUpdated) {
+      console.log(`   🏷️  ${pullResult.labelsUpdated} issue(s) avec labels mis à jour`);
+      changed = true;
+    }
+    if (pullResult.conflicts) {
+      console.log(`   ⚠️  ${pullResult.conflicts} conflit(s) ignoré(s) (in_progress)`);
+    }
+
+    const relPath = resolveBacklogRelativePathForSync(session);
+    const created = await syncBacklogToGitHub(backlog, repo, token, { backlogRelativePath: relPath });
+    if (created > 0) changed = true;
+  } catch (e) {
+    console.warn(`   ⚠️  Sync GitHub ignoré : ${(e as Error).message}`);
+  }
+
+  if (changed) saveBacklog(session, backlog);
+  console.log("");
+}
+
 export async function pipelineNext(session: OrchestratorSession): Promise<void> {
+  await syncGitHubIfConfigured(session);
   const backlog = loadBacklog(session);
   const issue = pickNextIssue(backlog);
 
@@ -120,6 +174,11 @@ export async function pipelineNext(session: OrchestratorSession): Promise<void> 
     printBacklogSummary(session, backlog);
     return;
   }
+
+  await ensureBacklogWorkBranch(session, backlog);
+
+  const docId = backlog.backlogDocumentId!.trim();
+  session.agentOutputRelativeSubdir = `runs/${docId}/${issue.id}`;
 
   console.log(`\n▶ Issue sélectionnée : [${issue.id}] ${issue.title}`);
   console.log(`  Priorité: ${issue.priority} | Taille: ${issue.size}`);
@@ -185,12 +244,19 @@ export async function pipelineNext(session: OrchestratorSession): Promise<void> 
     freshIssue.updatedAt = new Date().toISOString();
     saveBacklog(session, freshBacklog);
 
+    removeRunArtifactsForClosedIssue(session, freshBacklog, freshIssue, "done");
+
     const ghNum = freshIssue.githubIssueNumber;
     const repo = session.activeProject?.repo?.trim();
     const ghToken = process.env.GITHUB_TOKEN?.trim();
     if (isGithubCloseIssueOnPipelineDoneEnabled() && ghNum != null && repo && ghToken) {
       try {
-        await closeGitHubIssueWithComment(repo, ghToken, ghNum, githubPipelineCloseComment(freshIssue));
+        await closeGitHubIssueWithComment(
+          repo,
+          ghToken,
+          ghNum,
+          githubPipelineCloseComment(freshIssue, freshBacklog.backlogDocumentId),
+        );
       } catch (e) {
         console.warn(`GitHub fermeture automatique : ${formatErrorMessage(e)}`);
       }
@@ -205,6 +271,9 @@ export async function pipelineNext(session: OrchestratorSession): Promise<void> 
     freshIssue.updatedAt = new Date().toISOString();
     saveBacklog(session, freshBacklog);
     throw err;
+  } finally {
+    session.agentOutputRelativeSubdir = null;
+    session.backlogWorkBranch = null;
   }
 }
 

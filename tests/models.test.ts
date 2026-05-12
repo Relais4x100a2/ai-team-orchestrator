@@ -28,6 +28,31 @@ describe("parseBacklogJson", () => {
     assert.equal(b.issues[0].id, "issue-001");
   });
 
+  it("accepte backlogDocumentId et themeLabel optionnels", () => {
+    const b = parseBacklogJson({
+      version: 1,
+      lastUpdated: "2026-05-01T12:00:00.000Z",
+      issues: [validIssue],
+      backlogDocumentId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      themeLabel: "Sprint A",
+    });
+    assert.equal(b.backlogDocumentId, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    assert.equal(b.themeLabel, "Sprint A");
+  });
+
+  it("rejette un backlogDocumentId invalide", () => {
+    assert.throws(
+      () =>
+        parseBacklogJson({
+          version: 1,
+          lastUpdated: "2026-05-01T12:00:00.000Z",
+          issues: [validIssue],
+          backlogDocumentId: "pas-un-ulid",
+        }),
+      /backlogDocumentId/,
+    );
+  });
+
   it("rejette un id dupliqué", () => {
     assert.throws(
       () =>
@@ -36,7 +61,7 @@ describe("parseBacklogJson", () => {
           lastUpdated: "2026-05-01T12:00:00.000Z",
           issues: [validIssue, { ...validIssue, title: "Other" }],
         }),
-      /dupliqué/
+      /dupliqué/,
     );
   });
 
@@ -48,7 +73,7 @@ describe("parseBacklogJson", () => {
           lastUpdated: "2026-05-01T12:00:00.000Z",
           issues: [{ ...validIssue, status: "invalid" }],
         }),
-      /status/
+      /status/,
     );
   });
 });

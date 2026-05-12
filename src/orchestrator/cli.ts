@@ -1,12 +1,12 @@
 import { existsSync, readFileSync } from "fs";
 import { basename } from "path";
 import { PIPELINE_STEPS, type AgentRole, type PipelineStep } from "../agent-config.js";
-import { resolveBriefFilePath } from "../models.js";
+import { isValidBacklogDocumentId, resolveBriefFilePath } from "../models.js";
 import { checkFrugalMode } from "../spend-guard.js";
 import { syncBacklogToGitHub, pullIssuesFromGitHub } from "../github-sync.js";
 import { runAgent, AGENT_CONFIG, resolveCloudMode } from "./agent-runner.js";
 import { enforceProjectBranchGuard } from "./branch-guard.js";
-import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
+import { loadBacklog, resolveBacklogRelativePathForSync, saveBacklog, printBacklogSummary } from "./backlog-io.js";
 import { loadProject, warnIfLegacyLastRunDataExists } from "./project-loader.js";
 import { resolveUserPath } from "./paths-and-env.js";
 import { emptyOrchestratorSession } from "./session.js";
@@ -44,6 +44,20 @@ export async function main(): Promise<void> {
         .replace(/^-+|-+$/g, "") || null;
     console.log(`🎯 Projet : ${session.activeProject.name} (${session.activeProject.branch})`);
     warnIfLegacyLastRunDataExists(session.activeProjectSlug, session.activeProject.projectDataDir);
+  }
+
+  const backlogIdFlag = args.indexOf("--backlog-id");
+  if (backlogIdFlag !== -1) {
+    const rawId = args[backlogIdFlag + 1]?.trim();
+    if (!rawId || rawId.startsWith("--")) {
+      console.error("❌ --backlog-id nécessite un ULID (26 caractères).");
+      process.exit(1);
+    }
+    if (!isValidBacklogDocumentId(rawId)) {
+      console.error("❌ --backlog-id : format ULID invalide (Crockford base32, 26 caractères).");
+      process.exit(1);
+    }
+    session.cliBacklogDocumentId = rawId;
   }
 
   let briefFromFile: string | null = null;
@@ -133,7 +147,10 @@ export async function main(): Promise<void> {
       process.exit(1);
     }
     const backlog = loadBacklog(session);
-    const count = await syncBacklogToGitHub(backlog, session.activeProject.repo, token);
+    const rel = resolveBacklogRelativePathForSync(session);
+    const count = await syncBacklogToGitHub(backlog, session.activeProject.repo, token, {
+      backlogRelativePath: rel,
+    });
     if (count > 0) saveBacklog(session, backlog);
   } else if (args.includes("--pull-issues")) {
     if (!session.activeProject?.repo) {
@@ -208,6 +225,9 @@ Usage :
 Options globales :
   --project <file>
     → Charge le contexte du projet depuis projects/<file>.md
+
+  --backlog-id <ULID>
+    → Vérifie que le fichier backlog.json chargé porte ce backlogDocumentId (sécurité / multi-doc futur).
 
   --brief-file <file>
     → Lit le brief depuis un fichier. Avec --role + tâche CLI, le fichier devient le contexte additionnel.

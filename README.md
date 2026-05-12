@@ -122,7 +122,8 @@ ai-team-orchestrator/
 
 ### Persistance locale (backlog & exécutions pipeline)
 
-- **`backlog.json`** : à chaque lecture, le contenu est validé (enums `status` / `priority` / `size`, dates ISO 8601, unicité des `id`). Un fichier corrompu ou mal typé provoque une erreur explicite plutôt qu’une corruption silencieuse.
+- **`backlog.json`** : à chaque lecture, le contenu est validé (enums `status` / `priority` / `size`, dates ISO 8601, unicité des `id`). Un fichier corrompu ou mal typé provoque une erreur explicite plutôt qu’une corruption silencieuse. Les fichiers sans **`backlogDocumentId`** (ULID) sont migrés automatiquement à l’ouverture (réécriture du fichier). Option **`themeLabel`** pour le slug de la branche Git locale `backlog/<id>-<slug>` au `pipeline next`.
+- **`runs/<backlogDocumentId>/<issue-id>/`** : pendant `pipeline next`, les sorties agents (`dev.md`, `architect.md`, etc.) sont écrites ici dans le même répertoire de données que `backlog.json`. La suppression de ce dossier après clôture `done` est **désactivée par défaut** ; activer `RUNS_CLEANUP_ON_ISSUE_DONE=1` pour l’effacer automatiquement (voir `CLAUDE.md`).
 - **`pipeline-runs.json`** : chaque exécution de `npm run pipeline` (hors sous-commande `next`) ajoute une ligne d’historique avec `id`, brief (tronqué au-delà de ~50 ko), reprise éventuelle (`resumeFrom`), nombre d’itérations QA / sécurité, statut `success` | `partial` | `failed`, et horodatages.
 - **`pipeline:next`** : l’issue en cours reçoit `pipelineRun` = identifiant d’exécution (`run-<timestamp>-<suffix>`), réinitialisé si le pipeline échoue avant la fin.
 

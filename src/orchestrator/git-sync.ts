@@ -62,7 +62,7 @@ export function syncLocalGitBeforeAgent(session: OrchestratorSession, role: Agen
   const mode = resolveGitSyncMode();
   console.log(`   🔄 Git sync pré-agent (${role}) sur ${branch} [mode=${mode}]…`);
 
-  const dirty = runGit(repoDir, ["status", "--porcelain"]);
+  const dirty = runGit(repoDir, ["status", "--porcelain", "--untracked-files=no"]);
   if (dirty) {
     console.warn("   ⚠️  Git sync ignoré : working tree non propre (commit/stash requis).");
     return;

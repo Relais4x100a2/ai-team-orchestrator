@@ -12,6 +12,7 @@ import {
   saveLastRunContext,
 } from "./run-context.js";
 import { LAST_RUN_BASE_DIR } from "./paths-and-env.js";
+import { emptyOrchestratorSession } from "./session.js";
 import type { OrchestratorSession } from "./session.js";
 
 describe("detectGitHubBranchUrl", () => {
@@ -47,12 +48,12 @@ describe("detectGitHubPrUrl", () => {
 
 describe("resolveLastRunDir", () => {
   it("retourne LAST_RUN_BASE_DIR/<slug> quand activeProjectSlug est défini", () => {
-    const session: OrchestratorSession = { activeProject: null, activeProjectSlug: "mon-projet" };
+    const session: OrchestratorSession = { ...emptyOrchestratorSession(), activeProject: null, activeProjectSlug: "mon-projet" };
     assert.equal(resolveLastRunDir(session), resolve(LAST_RUN_BASE_DIR, "mon-projet"));
   });
 
   it("retourne LAST_RUN_BASE_DIR quand activeProjectSlug est null", () => {
-    const session: OrchestratorSession = { activeProject: null, activeProjectSlug: null };
+    const session: OrchestratorSession = { ...emptyOrchestratorSession(), activeProject: null, activeProjectSlug: null };
     assert.equal(resolveLastRunDir(session), LAST_RUN_BASE_DIR);
   });
 
@@ -67,6 +68,7 @@ describe("resolveLastRunDir", () => {
       projectDataDir: dataDir,
     };
     const session: OrchestratorSession = {
+      ...emptyOrchestratorSession(),
       activeProject: project,
       activeProjectSlug: "slug",
     };
@@ -87,6 +89,7 @@ describe("saveLastRunContext", () => {
       "utf-8",
     );
     const session: OrchestratorSession = {
+      ...emptyOrchestratorSession(),
       activeProject: null,
       activeProjectSlug: "mon-projet",
     };

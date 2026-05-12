@@ -2,35 +2,16 @@
  * Types et logique pure du backlog (parse sortie PM, sélection prochaine issue).
  */
 
-export type IssueStatus = "todo" | "in_progress" | "done" | "skipped";
-export type IssuePriority = "MUST" | "SHOULD" | "COULD" | "WONT";
-export type IssueSize = "S" | "M" | "L" | "XL";
-export type IssueSource = "top_down" | "bottom_up";
+export type {
+  IssueStatus,
+  IssuePriority,
+  IssueSize,
+  IssueSource,
+  BacklogIssue,
+  Backlog,
+} from "./models.js";
 
-export interface BacklogIssue {
-  id: string;
-  title: string;
-  description: string;
-  status: IssueStatus;
-  priority: IssuePriority;
-  size: IssueSize;
-  createdAt: string;
-  updatedAt: string;
-  completedAt: string | null;
-  pipelineRun: string | null;
-  githubIssueNumber?: number;
-  source?: IssueSource;
-  architectureVision?: string;
-  architectureAlternative?: string;
-  architectureRisks?: string;
-  reflectionChallenge?: string;
-}
-
-export interface Backlog {
-  version: number;
-  lastUpdated: string;
-  issues: BacklogIssue[];
-}
+import type { Backlog, BacklogIssue, IssuePriority, IssueSize } from "./models.js";
 
 export type ParsedIssueDraft = Omit<
   BacklogIssue,
@@ -158,4 +139,14 @@ export function pickNextIssue(backlog: Backlog): BacklogIssue | null {
       return SIZE_ORDER[a.size] - SIZE_ORDER[b.size];
     });
   return candidates[0] ?? null;
+}
+
+/**
+ * Chaîne utilisée pour le slug de branche Git (hors `themeLabel` explicite dans le backlog) :
+ * même tri que `pickNextIssue` sur le premier candidat, sinon « backlog ».
+ */
+export function themeSourceForWorkBranch(backlog: Backlog): string {
+  const next = pickNextIssue(backlog);
+  if (next?.title?.trim()) return next.title.trim();
+  return "backlog";
 }

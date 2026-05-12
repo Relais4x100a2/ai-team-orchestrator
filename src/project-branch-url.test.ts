@@ -34,6 +34,19 @@ describe("project-branch-url", () => {
       );
     });
 
+    it("override de branche pour URL tree", () => {
+      const p: ProjectContext = {
+        name: "x",
+        repo: "https://github.com/Org/Repo",
+        branch: "main",
+        content: "",
+      };
+      assert.equal(
+        buildGitHubTreeUrlForProject(p, "backlog/01ARZ3NDEKTSV4RRFFQ69G5FAV-slug"),
+        "https://github.com/Org/Repo/tree/backlog%2F01ARZ3NDEKTSV4RRFFQ69G5FAV-slug",
+      );
+    });
+
     it("accepte owner/repo court", () => {
       const p: ProjectContext = {
         name: "x",

@@ -1,8 +1,9 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
-import { dirname, resolve } from "path";
+import { dirname, isAbsolute, relative, resolve } from "path";
+import { ulid } from "ulid";
 import type { Backlog } from "../backlog.js";
 import type { IssuePriority, IssueStatus } from "../backlog.js";
-import { parseBacklogJson } from "../models.js";
+import { isValidBacklogDocumentId, parseBacklogJson } from "../models.js";
 import { BACKLOG_FALLBACK_PATH, mkdirWithDefaultGitignoreIfNeeded } from "./paths-and-env.js";
 import { resolveLastRunDir } from "./run-context.js";
 import type { OrchestratorSession } from "./session.js";
@@ -12,27 +13,88 @@ export function resolveBacklogPath(session: OrchestratorSession): string {
   return BACKLOG_FALLBACK_PATH;
 }
 
+/**
+ * Chemin relatif du fichier backlog pour affichage / corps d’issue GitHub
+ * (dépôt cible avec `local_path`, sinon emplacement côté orchestrateur).
+ */
+export function resolveBacklogRelativePathForSync(session: OrchestratorSession): string {
+  const abs = resolveBacklogPath(session);
+  const local = session.activeProject?.localPath?.trim();
+  if (local) {
+    const localAbs = resolve(local);
+    const rel = relative(localAbs, abs);
+    if (rel && !rel.startsWith("..") && !isAbsolute(rel)) {
+      return rel.split(/[/\\]+/).join("/");
+    }
+  }
+  if (session.activeProjectSlug) {
+    return `last-run/${session.activeProjectSlug}/backlog.json`;
+  }
+  return "backlog.json";
+}
+
+function validateCliBacklogId(session: OrchestratorSession, backlog: Backlog, backlogPath: string): void {
+  const expected = session.cliBacklogDocumentId?.trim();
+  if (!expected) return;
+  const got = backlog.backlogDocumentId?.trim();
+  if (!got || got !== expected) {
+    throw new Error(
+      `--backlog-id « ${expected} » ne correspond pas au backlog chargé (${backlogPath}) : ` +
+        (got ? `id document = « ${got} »` : "aucun backlogDocumentId (migration requise)."),
+    );
+  }
+}
+
+function migrateBacklogDocumentIdIfNeeded(session: OrchestratorSession, backlog: Backlog): boolean {
+  if (backlog.backlogDocumentId && isValidBacklogDocumentId(backlog.backlogDocumentId)) {
+    return false;
+  }
+  backlog.backlogDocumentId = ulid();
+  if (backlog.version < 2) backlog.version = 2;
+  return true;
+}
+
 export function loadBacklog(session: OrchestratorSession): Backlog {
-  if (!existsSync(resolveBacklogPath(session))) {
-    return { version: 1, lastUpdated: new Date().toISOString(), issues: [] };
+  const path = resolveBacklogPath(session);
+  if (!existsSync(path)) {
+    const empty: Backlog = {
+      version: 2,
+      lastUpdated: new Date().toISOString(),
+      issues: [],
+      backlogDocumentId: session.cliBacklogDocumentId?.trim() || ulid(),
+    };
+    validateCliBacklogId(session, empty, path);
+    return empty;
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(resolveBacklogPath(session), "utf-8"));
+    parsed = JSON.parse(readFileSync(path, "utf-8"));
   } catch {
     throw new Error(
       "backlog.json : JSON invalide. Corrige le fichier ou supprime-le pour repartir d'un backlog vide.",
     );
   }
+  let backlog: Backlog;
   try {
-    return parseBacklogJson(parsed);
+    backlog = parseBacklogJson(parsed);
   } catch (e) {
     const msg = (e as Error).message;
     throw new Error(`backlog.json : ${msg}`);
   }
+
+  const migrated = migrateBacklogDocumentIdIfNeeded(session, backlog);
+  validateCliBacklogId(session, backlog, path);
+  if (migrated) {
+    saveBacklog(session, backlog);
+  }
+  return backlog;
 }
 
 export function saveBacklog(session: OrchestratorSession, backlog: Backlog): void {
+  if (!backlog.backlogDocumentId) {
+    backlog.backlogDocumentId = ulid();
+  }
+  if (backlog.version < 2) backlog.version = 2;
   backlog.lastUpdated = new Date().toISOString();
   const path = resolveBacklogPath(session);
   mkdirWithDefaultGitignoreIfNeeded(dirname(path));
@@ -47,6 +109,9 @@ export function printBacklogSummary(session: OrchestratorSession, backlog?: Back
   console.log("\n" + "═".repeat(60));
   console.log("📦 BACKLOG — État actuel");
   console.log("═".repeat(60));
+  if (b.backlogDocumentId) {
+    console.log(`  Document backlog : ${b.backlogDocumentId}`);
+  }
   console.log(`  Total : ${b.issues.length} issues`);
   console.log(`  Todo         : ${counts.todo}`);
   console.log(`  In progress  : ${counts.in_progress}`);
