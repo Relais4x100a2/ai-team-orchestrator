@@ -10,12 +10,9 @@ import { loadBacklog, resolveBacklogRelativePathForSync, saveBacklog, printBackl
 import { loadProject, warnIfLegacyLastRunDataExists } from "./project-loader.js";
 import { resolveUserPath } from "./paths-and-env.js";
 import { emptyOrchestratorSession } from "./session.js";
-import {
-  fullPipeline,
-  pipelineNext,
-  pipelineBacklogReflection,
-  pmBacklogWorkflow,
-} from "./workflows.js";
+import { pipelineNext, pipelineBacklogReflection, pmBacklogWorkflow } from "./workflows.js";
+
+const PIPELINE_NEXT_RESUME_STEPS: PipelineStep[] = ["architect", "dev", "security", "qa"];
 
 export async function main(): Promise<void> {
   if (!process.env.CURSOR_API_KEY) {
@@ -121,7 +118,14 @@ export async function main(): Promise<void> {
   } else if (pipelineFlag !== -1) {
     const subcommand = args[pipelineFlag + 1];
     if (subcommand === "next") {
-      await pipelineNext(session);
+      if (resumeFrom && !PIPELINE_NEXT_RESUME_STEPS.includes(resumeFrom)) {
+        console.error(
+          `❌ --resume-from avec --pipeline next : étape « ${resumeFrom} » invalide (réflexion PM/red team : utiliser --pipeline backlog).`,
+        );
+        console.error(`   Étapes valides : ${PIPELINE_NEXT_RESUME_STEPS.join(", ")}`);
+        process.exit(1);
+      }
+      await pipelineNext(session, { resumeFrom });
     } else if (subcommand === "backlog") {
       const direction = args[pipelineFlag + 2];
       if (direction !== "forward" && direction !== "backward") {
@@ -132,9 +136,8 @@ export async function main(): Promise<void> {
       const brief = briefFromFile ?? (briefFromCli || "Structurer ou réviser le backlog selon le contexte fourni.");
       await pipelineBacklogReflection(session, direction, brief);
     } else {
-      const briefFromCli = args.slice(pipelineFlag + 1).join(" ");
-      const brief = briefFromFile ?? (briefFromCli || "Analyse le projet existant et propose des améliorations.");
-      await fullPipeline(session, brief, { resumeFrom, mode: "full" });
+      console.error("❌ --pipeline attend 'next' ou 'backlog forward|backward'.");
+      process.exit(1);
     }
   } else if (args.includes("--sync-issues")) {
     if (!session.activeProject?.repo) {
@@ -195,8 +198,8 @@ Usage :
   npm run agent:security "Audite la sécurité de l'app"
   npm run agent:redteam_reflection "Challenge produit/architecture"
 
-  npm run pipeline "Brief complet du projet"
-    → Lance le pipeline complet : PM → Archi → Red Team Réflexion → Dev → Sécurité → QA
+  npm run pipeline:next
+    → Exécute la prochaine issue backlog (architecte si M/L/XL, puis dev → sécurité ⇄ QA)
 
   npm run project -- monprojet --pipeline backlog forward "Méta-vision produit"
     → Lance la partie réflexion et met à jour backlog.json (top-down)
@@ -219,9 +222,6 @@ Usage :
   npm test
     → Exécute les tests unitaires (validation backlog.json côté modèle)
 
-  npm run pipeline:next
-    → Prend la prochaine issue MUST→SHOULD→COULD et lance la partie exécution (depuis dev, ou architect selon taille)
-
 Options globales :
   --project <file>
     → Charge le contexte du projet depuis projects/<file>.md
@@ -233,7 +233,7 @@ Options globales :
     → Lit le brief depuis un fichier. Avec --role + tâche CLI, le fichier devient le contexte additionnel.
 
   --resume-from <step>
-    → Reprend le pipeline : pm | architect | redteam_reflection | dev | security | qa
+    → Avec --pipeline next uniquement : architect | dev | security | qa
 
 Agents disponibles :
 ${Object.entries(AGENT_CONFIG)

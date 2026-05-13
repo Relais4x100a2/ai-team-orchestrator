@@ -61,9 +61,9 @@ cp projects/_template.md projects/monprojet.md
 # Lancer un agent seul pour tester
 npm run project -- monprojet --role pm "Ajouter une page d'upload"
 
-# Lancer le pipeline complet
-npm run project -- monprojet --pipeline full \
-  "Créer une fonctionnalité d'import de dataset CSV avec prévisualisation et validation"
+# Enrichir le backlog (réflexion) puis exécuter une issue
+npm run project -- monprojet --pipeline backlog forward "Vision produit"
+npm run project -- monprojet --pipeline next
 ```
 
 ### 4. Vérifications locales (contributeurs)
@@ -116,7 +116,7 @@ ai-team-orchestrator/
 ├── package.json
 ├── tsconfig.json
 ├── backlog.json              # 📋 État du backlog (généré localement, non versionné)
-├── pipeline-runs.json        # 📜 Historique des exécutions `pipeline full` (local, non versionné)
+├── pipeline-runs.json        # 📜 Historique des exécutions `pipeline next` (local, non versionné)
 └── .env.example
 ```
 
@@ -124,7 +124,7 @@ ai-team-orchestrator/
 
 - **`backlog.json`** : à chaque lecture, le contenu est validé (enums `status` / `priority` / `size`, dates ISO 8601, unicité des `id`). Un fichier corrompu ou mal typé provoque une erreur explicite plutôt qu’une corruption silencieuse. Les fichiers sans **`backlogDocumentId`** (ULID) sont migrés automatiquement à l’ouverture (réécriture du fichier). Option **`themeLabel`** pour le slug de la branche Git locale `backlog/<id>-<slug>` au `pipeline next`.
 - **`runs/<backlogDocumentId>/<issue-id>/`** : pendant `pipeline next`, les sorties agents (`dev.md`, `architect.md`, etc.) sont écrites ici dans le même répertoire de données que `backlog.json`. La suppression de ce dossier après clôture `done` est **désactivée par défaut** ; activer `RUNS_CLEANUP_ON_ISSUE_DONE=1` pour l’effacer automatiquement (voir `CLAUDE.md`).
-- **`pipeline-runs.json`** : chaque exécution de `npm run pipeline` (hors sous-commande `next`) ajoute une ligne d’historique avec `id`, brief (tronqué au-delà de ~50 ko), reprise éventuelle (`resumeFrom`), nombre d’itérations QA / sécurité, statut `success` | `partial` | `failed`, et horodatages.
+- **`pipeline-runs.json`** : chaque `pipeline next` ajoute une ligne d’historique avec `id`, brief (tronqué au-delà de ~50 ko), reprise éventuelle (`resumeFrom`), nombre d’itérations QA / sécurité, statut `success` | `partial` | `failed`, et horodatages.
 - **`pipeline:next`** : l’issue en cours reçoit `pipelineRun` = identifiant d’exécution (`run-<timestamp>-<suffix>`), réinitialisé si le pipeline échoue avant la fin.
 
 ## 🎯 Architecture multi-projets
@@ -217,19 +217,17 @@ npm run project -- monprojet --role ux "Esquisse les parcours"
 npm run project -- monprojet --role devops "Propose la CI"
 ```
 
-### Mode pipeline complet
+### Mode pipeline
 
-Lance les 2 macro-parties en séquence, chacun recevant le contexte du précédent :
+Réflexion backlog et exécution ticket sont **séparées** :
 
 ```bash
-# --project est obligatoire
-npm run project -- monprojet --pipeline full "Brief de la fonctionnalité"
-
-# Pipeline avec backlog (prend la prochaine issue dans le backlog)
+# --project est obligatoire pour cibler le dépôt
+npm run project -- monprojet --pipeline backlog forward "Vision produit"
 npm run project -- monprojet --pipeline next
 ```
 
-Par défaut, `pipeline next` lance uniquement la partie exécution (depuis `dev` pour `S`, depuis `architect` pour `M/L/XL`). Pour changer le point d'entrée, utiliser explicitement `npm run project -- monprojet --pipeline`.
+Par défaut, `pipeline next` démarre à `dev` pour `S`, à `architect` pour `M/L/XL`. Pour reprendre une exécution interrompue : `--resume-from architect|dev|security|qa` avec `pipeline next`.
 
 ### Mode pipeline backlog (partie 1)
 
@@ -260,19 +258,14 @@ Un index `run-context.json` dans ce même répertoire est aussi maintenu pour tr
 > Sécurité de reprise : au lancement, l’orchestrateur compare la `branch:` du projet actif avec la dernière branche détectée dans `run-context.json` et affiche un avertissement (ou demande confirmation) en cas d’écart. **Si la branche du projet est une branche d’intégration** (`main`, `master`, `trunk` par défaut, surcharge `BRANCH_MISMATCH_TRUNK_BRANCHES`), l’écart est traité comme **après merge** : `run-context.json` est **réaligné** sur le dépôt / branche du fichier projet et l’URL PR obsolète est retirée, sans prompt.
 
 ```bash
-# Lancer le PM pour générer le brief (sauvegardé dans last-run/monprojet/pm.md)
-npm run project -- monprojet --role pm "Brief initial..."
+# Reprendre l'exécution ticket depuis l'architecte
+npm run project -- monprojet --pipeline next --resume-from architect
 
-# Reprendre à partir de l’architecte avec la sortie du PM
-npm run project -- monprojet --pipeline full \
-  --brief-file last-run/monprojet/pm.md --resume-from architect
-
-# Reprendre depuis le dev après avoir ajusté l’architecture manuellement
-npm run project -- monprojet --pipeline full \
-  --brief-file last-run/monprojet/architect.md --resume-from dev
+# Reprendre depuis le dev
+npm run project -- monprojet --pipeline next --resume-from dev
 ```
 
-**Mode d’exécution :** dans le pipeline **`full`** (et `pipeline next`), les étapes **Product Manager** et **Data Architect** tournent en **local** dans le répertoire défini par `local_path` du fichier projet (ou le cwd de l’orchestrateur si absent). À partir du **Développeur**, le pipeline utilise **cloud** Cursor contre le repo cible défini par `repo:` dans le fichier projet. Le sous-pipeline **`--pipeline backlog` forward / backward** en revanche exécute **PM, architecte et réflexion red team en cloud** contre ce dépôt (`repo:` obligatoire comme pour le cloud en général).
+**Mode d’exécution :** sur `pipeline next`, l’étape **architecte** (si incluse) tourne en **local** ou cloud selon `PIPELINE_ARCHITECT_CLOUD` et `local_path`. À partir du **développeur**, le pipeline utilise **cloud** Cursor contre le repo `repo:`. Le sous-pipeline **`--pipeline backlog` forward / backward** exécute **PM, architecte et réflexion red team en cloud** contre ce dépôt.
 
 **Sortie agent :** pour PM, architecte et red team réflexion, une **sortie texte vide** après tentatives (second essai local ou cloud, puis secours cloud selon le cas) est traitée comme une **erreur explicite**. Si le texte est présent mais que le parse du backlog échoue, des fichiers `last-run/<slug>/pm-parse-failure.*.md` sont écrits pour inspection.
 
@@ -321,7 +314,7 @@ BRANCH_MISMATCH_POLICY=prompt  # prompt|warn|abort
 
 ### Agents hors pipeline
 
-Les rôles **`ux`**, **`ui`**, **`devops`**, **`sre`**, **`release`**, **`techwriter`**, **`privacy`** se lancent comme n'importe quel autre agent avec `--role <clé>`. Ils ne sont **pas** enchaînés automatiquement après `fullPipeline`.
+Les rôles **`ux`**, **`ui`**, **`devops`**, **`sre`**, **`release`**, **`techwriter`**, **`privacy`** se lancent comme n'importe quel autre agent avec `--role <clé>`. Ils ne sont **pas** enchaînés automatiquement après `pipeline next`.
 
 ```bash
 npm run project -- monprojet --role devops "Propose la CI GitHub Actions"

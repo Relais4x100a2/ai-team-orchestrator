@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from "fs";
-import { resolve } from "path";
 import type { Backlog, BacklogIssue } from "../backlog.js";
 import {
   assertPullRequestRepoMatchesProject,
@@ -13,33 +11,10 @@ import {
   validatePullRequestForRun,
 } from "../github-pr-pipeline.js";
 import { extractOwnerRepo } from "../github-sync.js";
-import type { QAVerdict, SecurityVerdict } from "../pipeline-detection.js";
 import { detectQAVerdict, detectSecurityVerdict } from "../pipeline-detection.js";
-import type { PipelineRunStatus } from "../models.js";
-import { detectGitHubPrUrl, loadLastRunContext, resolveLastRunDir } from "./run-context.js";
+import { readRunArtifactText, resolvePipelinePrUrl } from "./pipeline-pr-resolve.js";
+import type { PipelineExecutionOutcome } from "./pipeline-types.js";
 import type { OrchestratorSession } from "./session.js";
-
-export type PipelineExecutionOutcome = {
-  runStatus: PipelineRunStatus;
-  qaEscalated: boolean;
-  securityEscalated: boolean;
-  mediumSecurityNotes: boolean;
-  lastQaVerdict: QAVerdict | null;
-  lastSecurityVerdict: SecurityVerdict | null;
-  detectedPrUrl?: string;
-};
-
-function readRunArtifactText(session: OrchestratorSession, roleFile: string): string | undefined {
-  const sub = session.agentOutputRelativeSubdir?.trim();
-  if (!sub) return undefined;
-  const path = resolve(resolveLastRunDir(session), sub, roleFile);
-  if (!existsSync(path)) return undefined;
-  try {
-    return readFileSync(path, "utf-8");
-  } catch {
-    return undefined;
-  }
-}
 
 function assertMergePilotVerdicts(outcome: PipelineExecutionOutcome): void {
   if (outcome.qaEscalated || outcome.securityEscalated || outcome.mediumSecurityNotes) {
@@ -59,17 +34,6 @@ function assertMergePilotVerdicts(outcome: PipelineExecutionOutcome): void {
   if (!outcome.lastSecurityVerdict) {
     throw new Error("Pilote merge : verdict sécurité indétectable.");
   }
-}
-
-function resolvePrUrlForMergePilot(session: OrchestratorSession, outcome: PipelineExecutionOutcome): string {
-  const devText = readRunArtifactText(session, "dev.md");
-  const fromDev = devText ? detectGitHubPrUrl(devText) : undefined;
-  if (fromDev) return fromDev;
-  if (outcome.detectedPrUrl?.trim()) return outcome.detectedPrUrl.trim();
-  const ctx = loadLastRunContext(resolveLastRunDir(session));
-  const fromCtx = ctx?.latestPrUrl?.trim();
-  if (fromCtx) return fromCtx;
-  throw new Error("Pilote merge : aucune URL de PR dans la sortie dev ni dans run-context.json.");
 }
 
 function reinforceVerdictsFromArtifacts(
@@ -102,7 +66,10 @@ export async function runMergePilotAfterPipeline(
   const enriched = reinforceVerdictsFromArtifacts(session, outcome);
   assertMergePilotVerdicts(enriched);
 
-  const prUrl = resolvePrUrlForMergePilot(session, enriched);
+  const prUrl = resolvePipelinePrUrl(session, { mode: "mergePilot", outcome: enriched });
+  if (!prUrl) {
+    throw new Error("Pilote merge : aucune URL de PR dans la sortie dev ni dans run-context.json.");
+  }
   assertPullRequestRepoMatchesProject(prUrl, repo);
   const prNumber = parsePullRequestNumberFromUrl(prUrl);
   if (prNumber == null) {
