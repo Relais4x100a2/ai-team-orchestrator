@@ -134,6 +134,21 @@ export function saveLastRunContextPruneRunsPrefix(
   writeFileSync(resolve(lastRunDir, LAST_RUN_CONTEXT_FILE), JSON.stringify(nextContext, null, 2), "utf-8");
 }
 
+/** Retire `latestPrUrl` du run-context (nouveau sprint / défense en profondeur). */
+export function clearLastRunPrUrl(session: OrchestratorSession): void {
+  if (!session.activeProjectSlug) return;
+  const lastRunDir = resolveLastRunDir(session);
+  const previous = loadLastRunContext(lastRunDir);
+  if (!previous?.latestPrUrl) return;
+  const nextContext: LastRunContext = {
+    updatedAt: new Date().toISOString(),
+    projectSlug: session.activeProjectSlug,
+    latestByRole: previous.latestByRole ?? {},
+    latestBranchUrl: previous.latestBranchUrl,
+  };
+  writeFileSync(resolve(lastRunDir, LAST_RUN_CONTEXT_FILE), JSON.stringify(nextContext, null, 2), "utf-8");
+}
+
 export function migrateLegacySecurityFile(lastRunDir: string): void {
   const legacyPath = resolve(lastRunDir, "redteam.md");
   const securityPath = resolve(lastRunDir, "security.md");

@@ -68,7 +68,6 @@ function mergeRunContextBranch(session: OrchestratorSession, branchName: string)
     projectSlug: session.activeProjectSlug,
     latestByRole: previous?.latestByRole ?? {},
     latestBranchUrl: treeUrl,
-    latestPrUrl: previous?.latestPrUrl,
   };
   writeFileSync(resolve(lastRunDir, LAST_RUN_CONTEXT_FILE), JSON.stringify(next, null, 2), "utf-8");
 }

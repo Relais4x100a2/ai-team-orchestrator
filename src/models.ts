@@ -217,6 +217,15 @@ function validateBacklogIssue(raw: unknown, index: number): BacklogIssue {
             throw new Error(`issues[${index}].reflectionChallenge : chaîne attendue`);
           })();
 
+  let githubIssueNumber: number | undefined;
+  if (o.githubIssueNumber !== undefined) {
+    const n = o.githubIssueNumber;
+    if (typeof n !== "number" || !Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+      throw new Error(`issues[${index}].githubIssueNumber : entier positif obligatoire`);
+    }
+    githubIssueNumber = n;
+  }
+
   return {
     id: id.trim(),
     title: title.trim(),
@@ -228,6 +237,7 @@ function validateBacklogIssue(raw: unknown, index: number): BacklogIssue {
     updatedAt,
     completedAt,
     pipelineRun,
+    ...(githubIssueNumber !== undefined ? { githubIssueNumber } : {}),
     source,
     architectureVision,
     architectureAlternative,

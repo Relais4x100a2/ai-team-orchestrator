@@ -8,6 +8,7 @@ import {
   pullIssuesFromGitHub,
   syncBacklogToGitHub,
 } from "../github-sync.js";
+import type { QAVerdict, SecurityVerdict } from "../pipeline-detection.js";
 import {
   detectQAVerdict,
   detectSecurityVerdict,
@@ -26,7 +27,7 @@ import {
   trimContext,
   warnIfHandoffFallback,
 } from "./paths-and-env.js";
-import { detectGitHubPrUrl, loadLastRunContext, resolveLastRunDir } from "./run-context.js";
+import { detectGitHubPrUrl, loadLastRunContext, resolveLastRunDir, clearLastRunPrUrl } from "./run-context.js";
 import {
   loadBacklog,
   resolveBacklogRelativePathForSync,
@@ -37,7 +38,9 @@ import { ensureBacklogWorkBranch } from "./backlog-work-branch.js";
 import { removeRunArtifactsForClosedIssue } from "./runs-cleanup.js";
 import { runAgent, resolveCloudMode } from "./agent-runner.js";
 import { runArchitectForBacklogReflection } from "./pipeline-backlog.js";
+import { runMergePilotAfterPipeline, type PipelineExecutionOutcome } from "./pipeline-merge-pilot.js";
 import type { OrchestratorSession } from "./session.js";
+import { isGithubMergePrOnCiOkEnabled } from "../github-pr-pipeline.js";
 
 function isPipelineArchitectCloud(): boolean {
   const v = process.env.PIPELINE_ARCHITECT_CLOUD?.trim().toLowerCase();
@@ -176,6 +179,7 @@ export async function pipelineNext(session: OrchestratorSession): Promise<void> 
   }
 
   await ensureBacklogWorkBranch(session, backlog);
+  clearLastRunPrUrl(session);
 
   const docId = backlog.backlogDocumentId!.trim();
   session.agentOutputRelativeSubdir = `runs/${docId}/${issue.id}`;
@@ -221,7 +225,7 @@ export async function pipelineNext(session: OrchestratorSession): Promise<void> 
       XL: "architect",
     };
     const executionStart = executionStartBySize[issue.size];
-    await fullPipeline(session, issue.description + issueRef + githubCommentsBlock, {
+    const outcome = await fullPipeline(session, issue.description + issueRef + githubCommentsBlock, {
       pipelineRunId,
       issueSize: issue.size,
       resumeFrom: executionStart,
@@ -236,6 +240,8 @@ export async function pipelineNext(session: OrchestratorSession): Promise<void> 
             }
           : undefined,
     });
+
+    await runMergePilotAfterPipeline(session, backlog, issue, outcome);
 
     const freshBacklog = loadBacklog(session);
     const freshIssue = freshBacklog.issues.find((i) => i.id === issue.id)!;
@@ -292,7 +298,7 @@ export async function fullPipeline(
     };
     executionIssueInfo?: { id: string; title: string; priority: string; size: string };
   } = {},
-): Promise<void> {
+): Promise<PipelineExecutionOutcome> {
   const isExecutionOnly = opts.mode === "execution";
   const defaultStart = isExecutionOnly ? "dev" : "pm";
   const resumeFrom = opts.resumeFrom ?? defaultStart;
@@ -317,6 +323,9 @@ export async function fullPipeline(
   let securityEscalated = false;
   let mediumSecurityNotes = false;
   let runStatus: PipelineRunStatus = "success";
+  let lastQaVerdict: QAVerdict | null = null;
+  let lastSecurityVerdict: SecurityVerdict | null = null;
+  let detectedPrUrl: string | undefined;
 
   const briefForRecord =
     brief.length > 50_000 ? `${brief.slice(0, 50_000)}\n\n[… tronqué pour pipeline-runs.json …]` : brief;
@@ -459,7 +468,7 @@ export async function fullPipeline(
           )
         : brief;
 
-    let detectedPrUrl: string | undefined = detectGitHubPrUrl(implementation);
+    detectedPrUrl = detectGitHubPrUrl(implementation);
     if (detectedPrUrl) console.log(`   🔗 PR détectée : ${detectedPrUrl}`);
 
     let securityApproved = startIdx > 4;
@@ -515,6 +524,7 @@ export async function fullPipeline(
         );
 
         const securityVerdict = detectSecurityVerdict(securityReport);
+        lastSecurityVerdict = securityVerdict;
         console.log(`   📋 Verdict sécurité (détecté) : ${securityVerdict}`);
         if (securityVerdict === "APPROVED") {
           securityApproved = true;
@@ -622,6 +632,7 @@ export async function fullPipeline(
       );
 
       const verdict = detectQAVerdict(qaReport);
+      lastQaVerdict = verdict;
       console.log(`   📋 Verdict QA (détecté) : ${verdict}`);
       if (verdict === "APPROVE") {
         qaApproved = true;
@@ -689,6 +700,7 @@ export async function fullPipeline(
       );
       securityReport = securityAfterQaFix;
       const securityVerdict = detectSecurityVerdict(securityAfterQaFix);
+      lastSecurityVerdict = securityVerdict;
       console.log(`   📋 Verdict sécurité (détecté) : ${securityVerdict}`);
       if (securityVerdict === "CRITICAL_ISSUES") {
         implementation = await runAgent(
@@ -746,7 +758,18 @@ export async function fullPipeline(
         `6. Review QA                 : ${skipped("qa") ? "⏭  ignoré" : `✅ approuvée (${qaIteration} itération${qaIteration > 1 ? "s" : ""})`}`,
       );
     }
-    console.log("\n👉 Va sur GitHub pour review final et merger la PR.");
+    if (!isGithubMergePrOnCiOkEnabled()) {
+      console.log("\n👉 Va sur GitHub pour review final et merger la PR.");
+    }
+    return {
+      runStatus,
+      qaEscalated,
+      securityEscalated,
+      mediumSecurityNotes,
+      lastQaVerdict,
+      lastSecurityVerdict,
+      detectedPrUrl,
+    };
   } catch (e) {
     runStatus = "failed";
     throw e;

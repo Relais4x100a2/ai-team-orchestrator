@@ -76,6 +76,39 @@ describe("parseBacklogJson", () => {
       /status/,
     );
   });
+
+  it("conserve githubIssueNumber optionnel", () => {
+    const b = parseBacklogJson({
+      version: 1,
+      lastUpdated: "2026-05-01T12:00:00.000Z",
+      issues: [{ ...validIssue, githubIssueNumber: 42 }],
+    });
+    assert.equal(b.issues[0]!.githubIssueNumber, 42);
+  });
+
+  it("rejette githubIssueNumber invalide", () => {
+    for (const githubIssueNumber of [0, -1, 1.5, "12"]) {
+      assert.throws(
+        () =>
+          parseBacklogJson({
+            version: 1,
+            lastUpdated: "2026-05-01T12:00:00.000Z",
+            issues: [{ ...validIssue, githubIssueNumber }],
+          }),
+        /githubIssueNumber/,
+      );
+    }
+  });
+
+  it("round-trip JSON conserve githubIssueNumber", () => {
+    const parsed = parseBacklogJson({
+      version: 1,
+      lastUpdated: "2026-05-01T12:00:00.000Z",
+      issues: [{ ...validIssue, githubIssueNumber: 99 }],
+    });
+    const again = parseBacklogJson(JSON.parse(JSON.stringify(parsed)));
+    assert.equal(again.issues[0]!.githubIssueNumber, 99);
+  });
 });
 
 describe("parsePipelineRunsFile", () => {
