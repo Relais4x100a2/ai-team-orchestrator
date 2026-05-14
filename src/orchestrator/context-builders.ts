@@ -1,3 +1,4 @@
+import { formatProjectCoverageTargetLine } from "../models.js";
 import { loadLastRunContext, resolveLastRunDir } from "./run-context.js";
 import type { OrchestratorSession } from "./session.js";
 
@@ -70,6 +71,7 @@ export function buildQAPipelineContext(
     `- **Branche Git cloud (\`startingRef\`)** : ${branch}`,
     `- **Dernière URL branche** : ${branchUrlLine}`,
     `- **Dernière URL PR** : ${prUrlLine}`,
+    formatProjectCoverageTargetLine(session.activeProject?.coverageLinesPct),
     "",
     "**Consigne** : revois le code et le diff de **cette branche / cette PR** dans l'environnement cloud Cursor. Si le workspace local diffère, signale-le mais base ton verdict sur l'arbre distant aligné avec la cible ci-dessus.",
     "",

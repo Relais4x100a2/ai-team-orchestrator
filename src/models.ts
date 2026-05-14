@@ -73,6 +73,22 @@ export function isValidBacklogDocumentId(id: string): boolean {
   return typeof id === "string" && ULID_RE.test(id.trim());
 }
 
+export function parseCoverageLinesPct(value: unknown, fieldLabel: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${fieldLabel} : nombre entre 0 et 100 attendu`);
+  }
+  if (value < 0 || value > 100) {
+    throw new Error(`${fieldLabel} : doit être entre 0 et 100`);
+  }
+  return value;
+}
+
+export function formatProjectCoverageTargetLine(coverageLinesPct?: number): string {
+  if (coverageLinesPct === undefined) return "";
+  return `\n**Couverture lignes (cible) :** ${coverageLinesPct}%`;
+}
+
 export interface ProjectContext {
   name: string;
   repo: string;
@@ -84,6 +100,8 @@ export interface ProjectContext {
   projectDataDir?: string;
   /** Fichier markdown de contexte long résolu (pour diagnostics). */
   projectContextPath?: string;
+  /** Objectif de couverture lignes (0–100) pour les tests du dépôt cible. */
+  coverageLinesPct?: number;
 }
 
 export interface PipelineRun {

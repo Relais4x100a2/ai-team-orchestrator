@@ -6,7 +6,7 @@ Transforme une idée en code déployé via le pipeline par défaut (**6 étapes,
 **Réflexion -> Backlog : PM → Architecte → Red Team Réflexion**
 **Exécution : Dev → Sécurité → QA**.
 
-D’**autres agents** (UX, UI, DevOps, SRE, release, rédaction technique, privacy) sont disponibles **à la demande** (`npm run agent:<rôle>`) ; ils ne font pas partie du pipeline `full` pour limiter la durée des runs et éviter les régressions de flux.
+D’**autres agents** (UX, UI, DevOps, SRE, release, rédaction technique, privacy) sont disponibles **à la demande** (`npm run agent:<rôle>`) ; ils ne font pas partie du flux **`pipeline next`** pour limiter la durée des runs et éviter les régressions de flux.
 
 ## 🏗️ Architecture
 
@@ -16,7 +16,7 @@ Toi (super-superviseur)
   ▼
 Cursor SDK (orchestrateur TypeScript)
   │
-  ├── Pipeline full (2 macro-parties, sécurité avant QA)
+  ├── Pipeline par défaut (`--pipeline next` / `--pipeline backlog`, sécurité avant QA)
   │   ├── 📋 PM → 🏛️ Architect → 🧠 Red Team Réflexion → 💻 Dev ⇄ 🔐 Sécurité ⇄ 🧪 QA
   │
   └── Agents à la demande (même injection `projects/*.md`)
@@ -323,7 +323,7 @@ npm run project -- monprojet --role techwriter "Met à jour le README"
 
 ## 🔐 Chaîne assurance (DevOps / SRE / doc)
 
-Le flux **full** ne couvre pas automatiquement les **artefacts CI/CD, Docker ou observabilité** produits par les agents DevOps ou SRE. **Avant de merger** sur le dépôt cible tout changement issu ou suggéré par ces agents, prévoir au moins une des mesures suivantes (cumulables) :
+Le flux **`pipeline next`** ne couvre pas automatiquement les **artefacts CI/CD, Docker ou observabilité** produits par les agents DevOps ou SRE. **Avant de merger** sur le dépôt cible tout changement issu ou suggéré par ces agents, prévoir au moins une des mesures suivantes (cumulables) :
 
 | Action | Détail |
 |--------|--------|
@@ -341,7 +341,7 @@ Le flux **full** ne couvre pas automatiquement les **artefacts CI/CD, Docker ou 
 
 Pour les mises à jour **README / guides produit**, éviter d’exposer des détails internes inutiles (MCP, stratégie d’infra sensible) hors besoin légitime des contributeurs.
 
-Un futur flag du type **`--pipeline extended`** pourrait ajouter des étapes optionnelles **sans modifier** le comportement du `full` actuel ; ce n’est pas implémenté ici.
+Un futur flag du type **`--pipeline extended`** pourrait ajouter des étapes optionnelles **sans modifier** le comportement du **`pipeline next`** actuel ; ce n’est pas implémenté ici.
 
 ## ✏️ Personnaliser les agents
 

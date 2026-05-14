@@ -24,6 +24,7 @@ import {
   githubPipelineCloseComment,
   isGithubCloseIssueOnPipelineDoneEnabled,
 } from "./pipeline-github-env.js";
+import { issueBacklogClosureForRunStatus } from "./pipeline-next-closure.js";
 import { runMergePilotAfterPipeline } from "./pipeline-merge-pilot.js";
 import type { OrchestratorSession } from "./session.js";
 
@@ -143,30 +144,39 @@ export async function pipelineNext(session: OrchestratorSession, opts: PipelineN
 
     const freshBacklog = loadBacklog(session);
     const freshIssue = freshBacklog.issues.find((i) => i.id === issue.id)!;
-    freshIssue.status = "done";
-    freshIssue.completedAt = new Date().toISOString();
+    const closure = issueBacklogClosureForRunStatus(outcome.runStatus, new Date().toISOString());
+    freshIssue.status = closure.status;
+    freshIssue.completedAt = closure.completedAt;
     freshIssue.updatedAt = new Date().toISOString();
     saveBacklog(session, freshBacklog);
 
-    removeRunArtifactsForClosedIssue(session, freshBacklog, freshIssue, "done");
+    if (closure.status === "done") {
+      removeRunArtifactsForClosedIssue(session, freshBacklog, freshIssue, "done");
 
-    const ghNum = freshIssue.githubIssueNumber;
-    const repo = session.activeProject?.repo?.trim();
-    const ghToken = process.env.GITHUB_TOKEN?.trim();
-    if (isGithubCloseIssueOnPipelineDoneEnabled() && ghNum != null && repo && ghToken) {
-      try {
-        await closeGitHubIssueWithComment(
-          repo,
-          ghToken,
-          ghNum,
-          githubPipelineCloseComment(freshIssue, freshBacklog.backlogDocumentId),
-        );
-      } catch (e) {
-        console.warn(`GitHub fermeture automatique : ${formatErrorMessage(e)}`);
+      const ghNum = freshIssue.githubIssueNumber;
+      const repo = session.activeProject?.repo?.trim();
+      const ghToken = process.env.GITHUB_TOKEN?.trim();
+      if (isGithubCloseIssueOnPipelineDoneEnabled() && ghNum != null && repo && ghToken) {
+        try {
+          await closeGitHubIssueWithComment(
+            repo,
+            ghToken,
+            ghNum,
+            githubPipelineCloseComment(freshIssue, freshBacklog.backlogDocumentId),
+          );
+        } catch (e) {
+          console.warn(`GitHub fermeture automatique : ${formatErrorMessage(e)}`);
+        }
       }
     }
 
-    console.log(`\n✅ Issue ${issue.id} marquée DONE dans backlog.json`);
+    if (closure.logLabel === "DONE") {
+      console.log(`\n✅ Issue ${issue.id} marquée DONE dans backlog.json`);
+    } else {
+      console.log(
+        `\n⚠️ Issue ${issue.id} laissée in_progress dans backlog.json (run pipeline ${outcome.runStatus})`,
+      );
+    }
   } catch (err) {
     const freshBacklog = loadBacklog(session);
     const freshIssue = freshBacklog.issues.find((i) => i.id === issue.id)!;

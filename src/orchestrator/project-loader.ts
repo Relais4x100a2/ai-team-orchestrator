@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, statSync } from "fs";
 import matter from "gray-matter";
 import { isAbsolute, resolve } from "path";
 import type { ProjectContext } from "../models.js";
-import { assertValidProjectContext } from "../models.js";
+import { assertValidProjectContext, parseCoverageLinesPct } from "../models.js";
 import {
   assertFileUnderDir,
   assertSafeRelativeProjectPath,
@@ -130,6 +130,14 @@ export function loadProject(filePath: string): ProjectContext {
   if (data.project_data_dir !== undefined && typeof data.project_data_dir !== "string") {
     throw new Error(`Frontmatter "project_data_dir" invalide dans ${displayPath} : chaîne attendue.`);
   }
+  if (data.coverage_lines_pct !== undefined && typeof data.coverage_lines_pct !== "number") {
+    throw new Error(`Frontmatter "coverage_lines_pct" invalide dans ${displayPath} : nombre attendu.`);
+  }
+
+  const coverageLinesPct = parseCoverageLinesPct(
+    data.coverage_lines_pct,
+    `coverage_lines_pct dans ${displayPath}`,
+  );
 
   const hasDataDirKey = Object.prototype.hasOwnProperty.call(data, "project_data_dir");
   const hasContextKey = Object.prototype.hasOwnProperty.call(data, "project_context");
@@ -189,6 +197,7 @@ export function loadProject(filePath: string): ProjectContext {
     localPath: resolvedLocalPath,
     projectDataDir,
     projectContextPath,
+    coverageLinesPct,
   };
   assertValidProjectContext(project, absolutePath);
   return project;

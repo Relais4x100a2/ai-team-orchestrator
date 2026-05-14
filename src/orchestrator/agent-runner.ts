@@ -8,6 +8,7 @@ import {
   type AgentRole,
 } from "../agent-config.js";
 import type { IssueSize } from "../backlog.js";
+import { formatProjectCoverageTargetLine } from "../models.js";
 import { runCloudAgentWithPolicy } from "../cloud-policy.js";
 import { formatDataDirPath, formatErrorMessage, mkdirWithDefaultGitignoreIfNeeded, previewText } from "./paths-and-env.js";
 import { loadPrompt } from "./prompts.js";
@@ -87,7 +88,7 @@ export async function runAgent(
     : task;
 
   const projectSection = session.activeProject
-    ? `\n\n---\n\n## Contexte du projet cible\n\n**Projet :** ${session.activeProject.name}\n**Repo :** ${session.activeProject.repo}\n**Branche :** ${session.activeProject.branch}${session.activeProject.localPath ? `\n**Chemin local :** ${session.activeProject.localPath}` : ""}\n\n${session.activeProject.content}`
+    ? `\n\n---\n\n## Contexte du projet cible\n\n**Projet :** ${session.activeProject.name}\n**Repo :** ${session.activeProject.repo}\n**Branche :** ${session.activeProject.branch}${session.activeProject.localPath ? `\n**Chemin local :** ${session.activeProject.localPath}` : ""}${formatProjectCoverageTargetLine(session.activeProject.coverageLinesPct)}\n\n${session.activeProject.content}`
     : "";
 
   requireRepoUrlForCloud(session, options.cloud);

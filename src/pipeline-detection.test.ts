@@ -101,6 +101,13 @@ describe("detectQAVerdict", () => {
     const rapport = `### Verdict\nApprouvé, pas de blocage.\n\nExemple de liste :\n\`\`\`\nchangements requis sur le module fictif\n\`\`\``;
     assert.strictEqual(detectQAVerdict(rapport), "APPROVE");
   });
+
+  it("demande des changements si le rapport est ambigu sans signal d'approbation", () => {
+    assert.strictEqual(
+      detectQAVerdict("Rapport de revue sans directive VERDICT ni formulation d'approbation explicite."),
+      "REQUEST_CHANGES",
+    );
+  });
 });
 
 describe("extractQAVerdictSection", () => {
