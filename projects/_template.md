@@ -1,8 +1,17 @@
 ---
 name: Nom du projet
+# repo HTTPS GitHub — requis pour cloud, --pipeline backlog, --sync-issues, --pull-issues et sync GitHub au pipeline next
 repo: https://github.com/org/repo-name
 branch: main
-local_path: ~/code_dev/repo-name
+# local_path (optionnel) : clone local pour agents locaux ; sans lui, données sous last-run/<slug>/ et contexte = corps ci-dessous
+# local_path: ~/code_dev/repo-name
+# project_data_dir (optionnel, relatif au clone ; défaut .ai-team-orchestrator) :
+# project_data_dir: .ai-team-orchestrator
+# project_context (optionnel, relatif à project_data_dir ; sinon context.md puis corps ci-dessous) :
+# project_context: context.md
+# coverage_lines_pct (optionnel, 0–100) : cible de couverture injectée au QA
+# coverage_lines_pct: 80
+# Avec local_path : npm run migrate:project-context copie ce corps vers context.md et ne garde que le frontmatter ici
 ---
 
 ## Vue d'ensemble

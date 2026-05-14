@@ -1,0 +1,5 @@
+# Copier en projects/<slug>.yaml puis : npm run project:init -- <slug>
+name: Nom du projet
+repo: org/repo-name
+branch: main
+local_path: ~/code_dev/repo-name

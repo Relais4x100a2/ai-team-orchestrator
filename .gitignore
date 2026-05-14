@@ -9,3 +9,6 @@ pipeline-runs.json
 last-run/
 projects/*.md
 !projects/_template.md
+projects/*.yaml
+!projects/_template.project.yaml
+projects/*.yml

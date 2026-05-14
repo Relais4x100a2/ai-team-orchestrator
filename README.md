@@ -54,17 +54,24 @@ cp .env.example .env
 ### 3. Premier lancement
 
 ```bash
-# Créer un fichier projet (copier depuis le template)
-cp projects/_template.md projects/monprojet.md
-# Remplir le frontmatter : name, repo, branch, local_path
+# 1) Manifeste YAML (recommandé) → génère projects/<slug>.md
+cp projects/_template.project.yaml projects/monprojet.yaml
+# Éditer name, repo (org/repo ou URL), branch, local_path (clone déjà présent)
+npm run project:init -- monprojet
 
-# Lancer un agent seul pour tester
+# 2) Compléter le contexte dans projects/monprojet.md si besoin
+# 3) Optionnel avec local_path : déplacer le corps vers le clone
+npm run migrate:project-context
+
+# Test rapide
 npm run project -- monprojet --role pm "Ajouter une page d'upload"
 
-# Enrichir le backlog (réflexion) puis exécuter une issue
+# Flux habituel
 npm run project -- monprojet --pipeline backlog forward "Vision produit"
 npm run project -- monprojet --pipeline next
 ```
+
+Alternative manuelle : copier `projects/_template.md` en `projects/monprojet.md` et remplir le frontmatter à la main.
 
 ### 4. Vérifications locales (contributeurs)
 
@@ -103,8 +110,9 @@ ai-team-orchestrator/
 │       ├── technical-writer.md
 │       └── privacy-by-design.md
 ├── tests/                    # Tests unitaires (node:test + tsx)
-├── projects/                 # 📂 Contexte spécifique par projet (non versionné sauf _template.md)
-│   └── _template.md          # Template à copier pour chaque projet
+├── projects/                 # 📂 Contexte par projet (fichiers locaux ; templates versionnés)
+│   ├── _template.md            # Corps + exemple de frontmatter
+│   └── _template.project.yaml  # Manifeste minimal pour project:init
 ├── .cursor/
 │   ├── mcp.json              # 🔌 Connexions MCP (Figma, GitHub)
 │   ├── hooks.json             # 🛑 Hooks de supervision
@@ -123,7 +131,7 @@ ai-team-orchestrator/
 ### Persistance locale (backlog & exécutions pipeline)
 
 - **`backlog.json`** : à chaque lecture, le contenu est validé (enums `status` / `priority` / `size`, dates ISO 8601, unicité des `id`). Un fichier corrompu ou mal typé provoque une erreur explicite plutôt qu’une corruption silencieuse. Les fichiers sans **`backlogDocumentId`** (ULID) sont migrés automatiquement à l’ouverture (réécriture du fichier). Option **`themeLabel`** pour le slug de la branche Git locale `backlog/<id>-<slug>` au `pipeline next`.
-- **`runs/<backlogDocumentId>/<issue-id>/`** : pendant `pipeline next`, les sorties agents (`dev.md`, `architect.md`, etc.) sont écrites ici dans le même répertoire de données que `backlog.json`. La suppression de ce dossier après clôture `done` est **désactivée par défaut** ; activer `RUNS_CLEANUP_ON_ISSUE_DONE=1` pour l’effacer automatiquement (voir `CLAUDE.md`).
+- **`runs/<backlogDocumentId>/<issue-id>/`** : pendant `pipeline next`, les sorties agents (`dev.md`, `architect.md`, etc.) sont écrites ici dans le même répertoire de données que `backlog.json`. La suppression de ce dossier après clôture `done` ou `skipped` est **désactivée par défaut** ; activer `RUNS_CLEANUP_ON_ISSUE_DONE=1` et/ou `RUNS_CLEANUP_ON_SKIPPED=1` pour l’effacer automatiquement (voir `CLAUDE.md`).
 - **`pipeline-runs.json`** : chaque `pipeline next` ajoute une ligne d’historique avec `id`, brief (tronqué au-delà de ~50 ko), reprise éventuelle (`resumeFrom`), nombre d’itérations QA / sécurité, statut `success` | `partial` | `failed`, et horodatages.
 - **`pipeline:next`** : l’issue en cours reçoit `pipelineRun` = identifiant d’exécution (`run-<timestamp>-<suffix>`), réinitialisé si le pipeline échoue avant la fin.
 
@@ -190,14 +198,51 @@ Si tu passes d’un ancien dépôt des données dans `last-run/<slug>/` vers le 
 
 **Sans `local_path`** : comportement inchangé — `last-run/<slug>/` sous la racine de l’orchestrateur et contexte = corps du `projects/*.md`.
 
-### Ajouter un nouveau projet
+### Configurer et faire vivre un projet
 
-1. Copie `projects/_template.md` en `projects/monprojet.md`
-2. Remplis le frontmatter YAML : `name`, `repo`, `branch`, et `local_path` (chemin vers le repo cloné localement — permet aux agents locaux de lire le vrai code source)
-3. Ajoute les sections : Stack technique, Conventions, Déploiement, Contraintes
-4. Lance : `npm run project -- monprojet --role pm "..."`
+Trois fichiers utiles :
 
-> `projects/*.md` sont dans `.gitignore` (sauf `_template.md`) — tes informations de projet restent locales.
+| Fichier | Rôle |
+|---------|------|
+| `projects/<slug>.yaml` | Manifeste local (non versionné) : `name`, `repo`, `branch`, `local_path` |
+| `projects/<slug>.md` | Fiche lue par `--project` : frontmatter + contexte injecté aux agents |
+| `<local_path>/.ai-team-orchestrator/` | Données d’exécution (backlog, `run-context.json`, `context.md`, `runs/…`) si `local_path` est défini |
+
+**Création (recommandé)** — le clone cible doit déjà exister sur disque :
+
+```bash
+cp projects/_template.project.yaml projects/monprojet.yaml
+# éditer le YAML
+npm run project:init -- monprojet
+```
+
+`project:init` écrit `projects/<slug>.md` (frontmatter depuis le YAML + corps de `_template.md`), vérifie le chargement, puis affiche le slug pour la suite. Le slug vient du nom du fichier (`monprojet.yaml` → `monprojet`).
+
+**Après l’init** — remplacer `monprojet` par ton slug :
+
+```bash
+npm run project -- monprojet --role pm "…"
+npm run project -- monprojet --pipeline backlog forward "…"
+npm run project -- monprojet --backlog
+npm run project -- monprojet --pipeline next
+```
+
+Avec `GITHUB_TOKEN` et un `repo:` valide : `npm run sync:issues -- --project projects/monprojet.md`, `npm run pull:issues -- --project projects/monprojet.md` (chaque `pipeline next` peut aussi synchroniser au démarrage).
+
+**Cas courants**
+
+| Situation | Que faire |
+|-----------|-----------|
+| Nouveau projet | YAML + `project:init`, compléter le contexte dans le `.md`, puis `migrate:project-context` si tu veux le corps dans le clone |
+| Mettre à jour `name` / `repo` / `branch` / `local_path` | Éditer le `.md` ou le YAML puis `project:init --force` **seulement** si tu acceptes de remplacer le corps du `.md` par celui de `_template.md` |
+| Dossier `.ai-team-orchestrator` supprimé | Relancer une commande avec `--project` : le répertoire est recréé **vide** ; le backlog et `context.md` ne reviennent pas sans sauvegarde |
+| Contexte encore dans `projects/<slug>.md` | `npm run migrate:project-context` recopie le corps vers `context.md` dans le clone |
+| `context.md` perdu | Restaurer depuis une copie ou Git ; ni `project:init` ni le YAML ne le régénèrent |
+| Anciennes données sous `last-run/<slug>/` | Copie manuelle vers `<projectDataDir>/` (rappel affiché par l’orchestrateur si détecté) |
+
+**Création manuelle** : copier `projects/_template.md`, remplir le frontmatter, compléter les sections, puis `npm run project -- monprojet --role pm "…"`.
+
+> `projects/*.md` et `projects/*.yaml` sont ignorés par Git (sauf `_template.md` et `_template.project.yaml`) — la config projet reste locale.
 
 ## 🎯 Comment ça marche
 
@@ -229,6 +274,24 @@ npm run project -- monprojet --pipeline next
 
 Par défaut, `pipeline next` démarre à `dev` pour `S`, à `architect` pour `M/L/XL`. Pour reprendre une exécution interrompue : `--resume-from architect|dev|security|qa` avec `pipeline next`.
 
+**Commandes backlog utiles :**
+
+```bash
+npm run project -- monprojet --pm-backlog   # PM cloud → parse et enrichit backlog.json (sans pipeline réflexion complet)
+npm run project -- monprojet --backlog      # Synthèse todo / in_progress / done / skipped
+npm run sync:issues -- --project projects/monprojet.md
+npm run pull:issues -- --project projects/monprojet.md
+# pull sans importer de nouvelles issues GitHub orphelines :
+npm run pull:issues -- --project projects/monprojet.md --no-import
+```
+
+**Options globales CLI** (avec `npm run project -- …` ou `tsx src/orchestrator.ts …`) :
+
+| Option | Rôle |
+|--------|------|
+| `--backlog-id <ULID>` | Vérifie que le `backlog.json` chargé porte ce `backlogDocumentId` (après migration auto si besoin). |
+| `--brief-file <fichier>` | Lit le brief depuis un fichier ; avec `--role` + tâche CLI, le fichier devient le contexte additionnel. |
+
 ### Mode pipeline backlog (partie 1)
 
 Utilise la partie réflexion pour générer ou réviser le backlog:
@@ -245,9 +308,10 @@ npm run project -- monprojet --pipeline backlog backward "Retours utilisateurs e
 
 ### Mode pipeline next (partie 2)
 
-`pipeline next` exécute uniquement la partie exécution backlog -> QA:
+`pipeline next` exécute uniquement la partie exécution backlog → QA :
 - point d'entrée `dev` pour les tailles `S`
 - point d'entrée `architect` pour les tailles `M/L/XL`
+- sélection de l’issue : première `todo` hors priorité `WONT`, tri MUST → SHOULD → COULD puis taille S → M → L → XL
 
 **Reprise et fichiers de brief :**
 Après chaque exécution d’un agent, sa sortie est sauvegardée sous le **répertoire de données du projet** : soit `last-run/<slug>/` à la racine de l’orchestrateur (pas de `local_path`), soit `<local_path>/<project_data_dir>/` (défaut `.ai-team-orchestrator`). Le chemin exact est indiqué dans la sortie CLI.  
@@ -267,7 +331,11 @@ npm run project -- monprojet --pipeline next --resume-from dev
 
 **Mode d’exécution :** sur `pipeline next`, l’étape **architecte** (si incluse) tourne en **local** ou cloud selon `PIPELINE_ARCHITECT_CLOUD` et `local_path`. À partir du **développeur**, le pipeline utilise **cloud** Cursor contre le repo `repo:`. Le sous-pipeline **`--pipeline backlog` forward / backward** exécute **PM, architecte et réflexion red team en cloud** contre ce dépôt.
 
-**Sortie agent :** pour PM, architecte et red team réflexion, une **sortie texte vide** après tentatives (second essai local ou cloud, puis secours cloud selon le cas) est traitée comme une **erreur explicite**. Si le texte est présent mais que le parse du backlog échoue, des fichiers `last-run/<slug>/pm-parse-failure.*.md` sont écrits pour inspection.
+Avec **`local_path`**, au début de `pipeline next`, l’orchestrateur se place sur `project.branch` puis crée ou réutilise une branche locale `backlog/<backlogDocumentId>-<slug>` (slug depuis `themeLabel` ou le titre de la prochaine issue).
+
+**Sync GitHub au démarrage :** si le projet a un `repo:` et `GITHUB_TOKEN`, chaque `pipeline next` tente d’abord un rapatriement GitHub → `backlog.json` (statuts fermés, labels ; sans import de nouvelles issues), puis la création des issues manquantes côté GitHub. Les commandes manuelles `--sync-issues` / `--pull-issues` restent disponibles.
+
+**Sortie agent :** pour PM, architecte et red team réflexion, une **sortie texte vide** après tentatives (second essai local ou cloud, puis secours cloud selon le cas) est traitée comme une **erreur explicite**. Si le texte est présent mais que le parse du backlog échoue, des fichiers `pm-parse-failure.*.md` sont écrits dans le répertoire de données du projet pour inspection.
 
 Le pipeline inclut une **boucle de feedback** :
 - Sécurité (avant QA) approuve → passage à QA
@@ -283,8 +351,26 @@ Pour le **QA**, une ligne **`VERDICT QA: …`** ou **`VERDICT: …`** (en fin de
 
 En **`pipeline next`** (exécution ticket), si l’issue possède dans `backlog.json` les champs **`architectureVision`** et/ou **`reflectionChallenge`** (souvent remplis après `--pipeline backlog` forward / backward), le QA reçoit aussi ces blocs en contexte, en plus du handoff architecte de l’exécution et de la sortie développeur, pour conserver la trace produit / red team liée à l’issue.
 
+Si l’issue backlog référence un numéro GitHub (`githubIssueNumber`) et que `GITHUB_TOKEN` est configuré, les **commentaires** de l’issue sont injectés dans le brief d’exécution.
+
+**Après un run réussi :** avec `GITHUB_CLOSE_ISSUE_ON_PIPELINE_DONE=1`, l’issue GitHub liée peut être fermée automatiquement. Avec `GITHUB_MERGE_PR_ON_CI_OK=1`, un pilote merge attend une CI verte sur la PR du run puis merge via l’API GitHub (méthode `GITHUB_MERGE_METHOD`, timeouts de poll — voir `.env.example`). Sans ces opt-in, fermeture d’issue et merge restent manuels sur GitHub.
+
 Le pipeline s'arrête à chaque **checkpoint** pour ta validation
 (via les hooks Cursor).
+
+### Synchronisation GitHub Issues
+
+Prérequis : `--project` avec `repo:` HTTPS GitHub et `GITHUB_TOKEN` dans `.env`.
+
+| Commande | Effet |
+|----------|--------|
+| `--sync-issues` | Crée sur GitHub les issues absentes du backlog (sans `githubIssueNumber`). |
+| `--pull-issues` | Rapatrie fermetures et labels GitHub vers `backlog.json`. |
+| `--pull-issues --no-import` | Idem sans importer de nouvelles issues GitHub non liées au backlog. |
+
+À la création d’issue, le corps inclut `backlogDocumentId` et le chemin relatif vers `backlog.json`. Si `GITHUB_SYNC_BACKLOG_DOCUMENT_LABEL=1`, le label `backlog:<backlogDocumentId>` est aussi ajouté.
+
+Pour fermer en lot les issues GitHub déjà `done` dans le backlog : `npx tsx scripts/close-done-github-issues.ts --project <slug|chemin.md>` (ou `--backlog` + `--repo`).
 
 ### Sync Git auto avant agent
 
