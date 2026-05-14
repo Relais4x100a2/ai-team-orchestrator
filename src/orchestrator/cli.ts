@@ -14,6 +14,20 @@ import { pipelineNext, pipelineBacklogReflection, pmBacklogWorkflow } from "./wo
 
 const PIPELINE_NEXT_RESUME_STEPS: PipelineStep[] = ["architect", "dev", "security", "qa"];
 
+export function getPipelineSubcommandError(subcommand: string | undefined): string | null {
+  if (subcommand === "next" || subcommand === "backlog") return null;
+  return "❌ --pipeline attend 'next' ou 'backlog forward|backward'.";
+}
+
+export function getPipelineNextResumeError(resumeFrom: PipelineStep | undefined): string | null {
+  if (!resumeFrom || PIPELINE_NEXT_RESUME_STEPS.includes(resumeFrom)) return null;
+  return `❌ --resume-from avec --pipeline next : étape « ${resumeFrom} » invalide (réflexion PM/red team : utiliser --pipeline backlog).`;
+}
+
+export function pipelineNextCliOptions(resumeFrom: PipelineStep | undefined): { resumeFrom?: PipelineStep } {
+  return { resumeFrom };
+}
+
 export async function main(): Promise<void> {
   if (!process.env.CURSOR_API_KEY) {
     console.error("❌ CURSOR_API_KEY manquante. Copie .env.example en .env et remplis-la.");
@@ -118,14 +132,13 @@ export async function main(): Promise<void> {
   } else if (pipelineFlag !== -1) {
     const subcommand = args[pipelineFlag + 1];
     if (subcommand === "next") {
-      if (resumeFrom && !PIPELINE_NEXT_RESUME_STEPS.includes(resumeFrom)) {
-        console.error(
-          `❌ --resume-from avec --pipeline next : étape « ${resumeFrom} » invalide (réflexion PM/red team : utiliser --pipeline backlog).`,
-        );
+      const resumeError = getPipelineNextResumeError(resumeFrom);
+      if (resumeError) {
+        console.error(resumeError);
         console.error(`   Étapes valides : ${PIPELINE_NEXT_RESUME_STEPS.join(", ")}`);
         process.exit(1);
       }
-      await pipelineNext(session, { resumeFrom });
+      await pipelineNext(session, pipelineNextCliOptions(resumeFrom));
     } else if (subcommand === "backlog") {
       const direction = args[pipelineFlag + 2];
       if (direction !== "forward" && direction !== "backward") {
@@ -136,7 +149,8 @@ export async function main(): Promise<void> {
       const brief = briefFromFile ?? (briefFromCli || "Structurer ou réviser le backlog selon le contexte fourni.");
       await pipelineBacklogReflection(session, direction, brief);
     } else {
-      console.error("❌ --pipeline attend 'next' ou 'backlog forward|backward'.");
+      const subcommandError = getPipelineSubcommandError(subcommand);
+      console.error(subcommandError ?? "❌ --pipeline attend 'next' ou 'backlog forward|backward'.");
       process.exit(1);
     }
   } else if (args.includes("--sync-issues")) {
