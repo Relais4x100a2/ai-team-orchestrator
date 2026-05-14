@@ -111,7 +111,7 @@ const AGENT_DEFINITIONS = {
     } satisfies ModelSelection,
   },
   security: {
-    promptFile: "red-team",
+    promptFile: "security",
     description: "Sécurité — audit de sécurité",
     tier: "strong" as const,
     // composer-2 : uniquement le param `fast` est une variante connue côté API Agents

@@ -41,7 +41,7 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
 | `dev`      | `fullstack-dev`                            |
 | `qa`       | `qa-engineer`                              |
 | `redteam_reflection` | `red-team-reflection`               |
-| `security` | `red-team`                                 |
+| `security` | `security`                                 |
 | `devops`   | `devops-platform`                          |
 | `sre`      | `sre-observability`                        |
 | `release`  | `release-manager`                          |
@@ -60,6 +60,7 @@ npx tsc --noEmit     # Vérification types sans écrire de fichiers (obligatoire
 npm test             # Tests (backlog PM, verdicts pipeline) — `tsx --test`
 npm run verify:prompts  # Vérifie que tous les `src/prompts/*.md` référencés existent
 npm run migrate:project-context  # Corps des projects/*.md avec local_path → context.md dans le dépôt cloné ; projects/ réduit au frontmatter
+npm run context:scan             # Faits JSON/texte pour générer context.md (voir commande globale /scaffold-context)
 
 npm run start        # Aide interactive + liste des rôles (--role)
 

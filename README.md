@@ -102,7 +102,7 @@ ai-team-orchestrator/
 │       ├── ui-designer.md
 │       ├── fullstack-dev.md
 │       ├── qa-engineer.md
-│       ├── red-team.md
+│       ├── security.md
 │       ├── red-team-reflection.md
 │       ├── devops-platform.md
 │       ├── sre-observability.md
@@ -195,6 +195,8 @@ Les clés `project_data_dir` et `project_context` **sans** `local_path` provoque
 Si tu passes d’un ancien dépôt des données dans `last-run/<slug>/` vers le dépôt cible, l’orchestrateur affiche un rappel pour copier manuellement (`cp -a last-run/<slug>/. <projectDataDir>/`).
 
 **Migration du détail projet (stack, conventions, etc.)** : avec `local_path` renseigné, exécute `npm run migrate:project-context`. Le script écrit le corps markdown de chaque `projects/<slug>.md` dans `<projectDataDir>/context.md`, puis ne laisse que le **frontmatter** dans le fichier `projects/` (les entrées sans `local_path` sont ignorées). Tu peux relancer la commande après avoir édité un fichier projet : un `context.md` déjà présent est alors remplacé (avertissement en console).
+
+**Générer ou compléter `context.md`** : gabarit versionné `projects/_template.context.md` ; scan déterministe `npm run context:scan -- <slug|projects/foo.md|chemin-repo> [--json]` ; commande slash **utilisateur** `~/.cursor/commands/scaffold-context.md` (`/scaffold-context`, disponible dans tous les workspaces) pour fusionner le scan, le gabarit et des questions interactives avant écriture sous `<projectDataDir>/`.
 
 **Sans `local_path`** : comportement inchangé — `last-run/<slug>/` sous la racine de l’orchestrateur et contexte = corps du `projects/*.md`.
 
@@ -345,7 +347,7 @@ Le pipeline inclut une **boucle de feedback** :
 
 **Garde-fou sortie développeur** : avant chaque passage à la sécurité ou au QA, si la sortie dev est quasi vide, sans section **`## Handoff Security & QA`** exploitable et sans URL de PR ni dans le texte ni dans `run-context.json`, le pipeline **s’arrête avec une erreur explicite** (évite audits / revues sur une section implémentation vide).
 
-Le rapport de l’agent sécurité doit se terminer par une ligne **`VERDICT SÉCURITÉ: APPROVED|MEDIUM|CRITICAL`** (voir `src/prompts/red-team.md`) pour que le pipeline classe le verdict sans ambiguïté. L’orchestrateur injecte aussi la **branche cible** et les URLs `run-context.json` dans le contexte d’audit.
+Le rapport de l’agent sécurité doit se terminer par une ligne **`VERDICT SÉCURITÉ: APPROVED|MEDIUM|CRITICAL`** (voir `src/prompts/security.md`) pour que le pipeline classe le verdict sans ambiguïté. L’orchestrateur injecte aussi la **branche cible** et les URLs `run-context.json` dans le contexte d’audit.
 
 Pour le **QA**, une ligne **`VERDICT QA: …`** ou **`VERDICT: …`** (en fin de rapport de préférence) permet à l’orchestrateur de distinguer **APPROVE** et **REQUEST_CHANGES** sans ambiguïté. Si plusieurs lignes `VERDICT` / `VERDICT QA` sont présentes, **seule la dernière** est prise en compte (voir `src/prompts/qa-engineer.md` et `detectQAVerdict` dans `src/pipeline-detection.ts`). Les synonymes d’approbation (LGTM, « OK pour merge », etc.) et la valeur machine **`REQUEST_CHANGES`** sont reconnus. Le contexte **branche** et `run-context.json` est injecté comme pour l’audit sécurité.
 
