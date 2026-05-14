@@ -34,8 +34,11 @@ export function isTrunkBranch(branch: string): boolean {
 }
 
 /** URL canonique `https://github.com/owner/repo/tree/branch` si le frontmatter est exploitable. */
-export function buildGitHubTreeUrlForProject(project: ProjectContext): string | undefined {
-  const branch = project.branch?.trim();
+export function buildGitHubTreeUrlForProject(
+  project: ProjectContext,
+  branchOverride?: string,
+): string | undefined {
+  const branch = (branchOverride ?? project.branch)?.trim();
   const repoRaw = project.repo?.trim();
   if (!branch || !repoRaw) return undefined;
 

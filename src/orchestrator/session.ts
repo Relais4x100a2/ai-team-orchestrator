@@ -4,8 +4,23 @@ import type { ProjectContext } from "../models.js";
 export type OrchestratorSession = {
   activeProject: ProjectContext | null;
   activeProjectSlug: string | null;
+  /** Si défini, doit correspondre à `backlog.backlogDocumentId` après migration (`loadBacklog`). */
+  cliBacklogDocumentId: string | null;
+  /**
+   * Sous-répertoire relatif au répertoire de données pour les sorties agents
+   * (ex. `runs/<backlogDocumentId>/<issueId>` pendant `pipeline next`).
+   */
+  agentOutputRelativeSubdir: string | null;
+  /** Branche Git locale + `startingRef` cloud pour l’exécution ticket (`backlog/...`). */
+  backlogWorkBranch: string | null;
 };
 
 export function emptyOrchestratorSession(): OrchestratorSession {
-  return { activeProject: null, activeProjectSlug: null };
+  return {
+    activeProject: null,
+    activeProjectSlug: null,
+    cliBacklogDocumentId: null,
+    agentOutputRelativeSubdir: null,
+    backlogWorkBranch: null,
+  };
 }

@@ -103,6 +103,17 @@ export function extractQAVerdictSection(qaReport: string): string | null {
   return sectionBody.trim() || null;
 }
 
+function containsApprovalHaystack(haystack: string): boolean {
+  const n = normalizeAccents(haystack);
+  if (/\blgtm\b/.test(n)) return true;
+  if (/\bapproved\b/.test(n) || /\bapprouve\b/.test(n) || /\bapprouvee\b/.test(n)) return true;
+  if (/\bok\s+pour\s+merge\b/.test(n) || /\bmerge\s+ok\b/.test(n) || /\bpret\s+a\s+merger\b/.test(n)) {
+    return true;
+  }
+  if (/\baucun\s+blocage\b/.test(n) || /\bpas\s+de\s+blocage\b/.test(n)) return true;
+  return false;
+}
+
 function containsRequestChangesHaystack(haystack: string): boolean {
   const n = normalizeAccents(haystack);
 
@@ -238,7 +249,19 @@ export function detectQAVerdict(qaReport: string): QAVerdict {
     return "REQUEST_CHANGES";
   }
 
-  return "APPROVE";
+  if (containsApprovalHaystack(bodySansBlocsCode)) {
+    return "APPROVE";
+  }
+
+  const normalizedBody = normalizeAccents(bodySansBlocsCode);
+  if (
+    /\bchangements?\s+requis\b/.test(normalizedBody) &&
+    !containsRequestChangesHaystack(bodySansBlocsCode)
+  ) {
+    return "APPROVE";
+  }
+
+  return "REQUEST_CHANGES";
 }
 
 /**

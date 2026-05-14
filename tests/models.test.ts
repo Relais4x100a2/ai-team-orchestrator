@@ -28,6 +28,31 @@ describe("parseBacklogJson", () => {
     assert.equal(b.issues[0].id, "issue-001");
   });
 
+  it("accepte backlogDocumentId et themeLabel optionnels", () => {
+    const b = parseBacklogJson({
+      version: 1,
+      lastUpdated: "2026-05-01T12:00:00.000Z",
+      issues: [validIssue],
+      backlogDocumentId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      themeLabel: "Sprint A",
+    });
+    assert.equal(b.backlogDocumentId, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    assert.equal(b.themeLabel, "Sprint A");
+  });
+
+  it("rejette un backlogDocumentId invalide", () => {
+    assert.throws(
+      () =>
+        parseBacklogJson({
+          version: 1,
+          lastUpdated: "2026-05-01T12:00:00.000Z",
+          issues: [validIssue],
+          backlogDocumentId: "pas-un-ulid",
+        }),
+      /backlogDocumentId/,
+    );
+  });
+
   it("rejette un id dupliqué", () => {
     assert.throws(
       () =>
@@ -36,7 +61,7 @@ describe("parseBacklogJson", () => {
           lastUpdated: "2026-05-01T12:00:00.000Z",
           issues: [validIssue, { ...validIssue, title: "Other" }],
         }),
-      /dupliqué/
+      /dupliqué/,
     );
   });
 
@@ -48,8 +73,41 @@ describe("parseBacklogJson", () => {
           lastUpdated: "2026-05-01T12:00:00.000Z",
           issues: [{ ...validIssue, status: "invalid" }],
         }),
-      /status/
+      /status/,
     );
+  });
+
+  it("conserve githubIssueNumber optionnel", () => {
+    const b = parseBacklogJson({
+      version: 1,
+      lastUpdated: "2026-05-01T12:00:00.000Z",
+      issues: [{ ...validIssue, githubIssueNumber: 42 }],
+    });
+    assert.equal(b.issues[0]!.githubIssueNumber, 42);
+  });
+
+  it("rejette githubIssueNumber invalide", () => {
+    for (const githubIssueNumber of [0, -1, 1.5, "12"]) {
+      assert.throws(
+        () =>
+          parseBacklogJson({
+            version: 1,
+            lastUpdated: "2026-05-01T12:00:00.000Z",
+            issues: [{ ...validIssue, githubIssueNumber }],
+          }),
+        /githubIssueNumber/,
+      );
+    }
+  });
+
+  it("round-trip JSON conserve githubIssueNumber", () => {
+    const parsed = parseBacklogJson({
+      version: 1,
+      lastUpdated: "2026-05-01T12:00:00.000Z",
+      issues: [{ ...validIssue, githubIssueNumber: 99 }],
+    });
+    const again = parseBacklogJson(JSON.parse(JSON.stringify(parsed)));
+    assert.equal(again.issues[0]!.githubIssueNumber, 99);
   });
 });
 

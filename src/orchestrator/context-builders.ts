@@ -1,3 +1,4 @@
+import { formatProjectCoverageTargetLine } from "../models.js";
 import { loadLastRunContext, resolveLastRunDir } from "./run-context.js";
 import type { OrchestratorSession } from "./session.js";
 
@@ -9,7 +10,11 @@ export function buildSecurityImplementationContext(
   issueDescription?: string,
 ): string {
   const repo = session.activeProject?.repo?.trim() || process.env.TARGET_REPO_URL?.trim() || "—";
-  const branch = session.activeProject?.branch?.trim() || process.env.TARGET_BRANCH?.trim() || "—";
+  const branch =
+    session.backlogWorkBranch?.trim() ||
+    session.activeProject?.branch?.trim() ||
+    process.env.TARGET_BRANCH?.trim() ||
+    "—";
   let branchUrlLine = "—";
   let prUrlLine = "—";
   if (session.activeProjectSlug) {
@@ -44,7 +49,11 @@ export function buildQAPipelineContext(
   detectedPrUrl?: string,
 ): string {
   const repo = session.activeProject?.repo?.trim() || process.env.TARGET_REPO_URL?.trim() || "—";
-  const branch = session.activeProject?.branch?.trim() || process.env.TARGET_BRANCH?.trim() || "—";
+  const branch =
+    session.backlogWorkBranch?.trim() ||
+    session.activeProject?.branch?.trim() ||
+    process.env.TARGET_BRANCH?.trim() ||
+    "—";
   let branchUrlLine = "—";
   let prUrlLine = "—";
   if (session.activeProjectSlug) {
@@ -62,6 +71,7 @@ export function buildQAPipelineContext(
     `- **Branche Git cloud (\`startingRef\`)** : ${branch}`,
     `- **Dernière URL branche** : ${branchUrlLine}`,
     `- **Dernière URL PR** : ${prUrlLine}`,
+    formatProjectCoverageTargetLine(session.activeProject?.coverageLinesPct),
     "",
     "**Consigne** : revois le code et le diff de **cette branche / cette PR** dans l'environnement cloud Cursor. Si le workspace local diffère, signale-le mais base ton verdict sur l'arbre distant aligné avec la cible ci-dessus.",
     "",

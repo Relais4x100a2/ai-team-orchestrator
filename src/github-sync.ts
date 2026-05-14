@@ -12,6 +12,17 @@
 import type { Backlog, BacklogIssue, IssuePriority, IssueSize } from "./models.js";
 import { generateIssueId } from "./backlog.js";
 
+/** Contexte machine pour le corps des issues GitHub (liaison document backlog). */
+export type GitHubIssueBacklogContext = {
+  backlogDocumentId: string;
+  backlogRelativePath: string;
+};
+
+function isGithubSyncBacklogDocumentLabelEnabled(): boolean {
+  const v = process.env.GITHUB_SYNC_BACKLOG_DOCUMENT_LABEL?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 /** Extrait "owner/repo" depuis une URL GitHub. */
 export function extractOwnerRepo(repoUrl: string): string {
   const match = repoUrl.match(/github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/);
@@ -34,14 +45,17 @@ function summarizeGithubErrorBody(raw: string, max = 280): string {
   return compact.length <= max ? compact : `${compact.slice(0, max - 1)}…`;
 }
 
-function issueBody(issue: BacklogIssue): string {
+export function buildGitHubIssueBody(issue: BacklogIssue, ctx: GitHubIssueBacklogContext): string {
   const lines: string[] = [
+    `**Document backlog** : \`${ctx.backlogDocumentId}\``,
+    `**Fichier backlog** : \`${ctx.backlogRelativePath}\``,
+    "",
     `**Priorité :** ${issue.priority} | **Taille :** ${issue.size}`,
     "",
     issue.description || "_Voir le backlog PM pour les détails._",
     "",
     `---`,
-    `*Généré par ai-team-orchestrator — id interne : \`${issue.id}\`*`,
+    `*Généré par ai-team-orchestrator — id story : \`${issue.id}\`*`,
   ];
   return lines.join("\n");
 }
@@ -54,6 +68,7 @@ function issueLabels(issue: BacklogIssue): string[] {
   if (issue.size === "S") labels.push("size:S");
   if (issue.size === "M") labels.push("size:M");
   if (issue.size === "L") labels.push("size:L");
+  if (issue.size === "XL") labels.push("size:XL");
   return labels;
 }
 
@@ -61,15 +76,20 @@ async function createGitHubIssue(
   ownerRepo: string,
   token: string,
   issue: BacklogIssue,
+  backlogCtx: GitHubIssueBacklogContext,
 ): Promise<number> {
+  const labels = [...issueLabels(issue)];
+  if (isGithubSyncBacklogDocumentLabelEnabled()) {
+    labels.push(`backlog:${backlogCtx.backlogDocumentId}`);
+  }
   const url = `https://api.github.com/repos/${ownerRepo}/issues`;
   const res = await fetch(url, {
     method: "POST",
     headers: githubApiHeaders(token),
     body: JSON.stringify({
       title: `[${issue.id}] ${issue.title}`,
-      body: issueBody(issue),
-      labels: issueLabels(issue),
+      body: buildGitHubIssueBody(issue, backlogCtx),
+      labels,
     }),
   });
 
@@ -195,14 +215,49 @@ export async function closeGitHubIssueWithComment(
 
 /**
  * Crée les issues GitHub manquantes (sans githubIssueNumber) et met à jour le backlog.
+ * Avant création, récupère les issues existantes sur GitHub et relie celles dont le titre
+ * contient l'id interne (`[issue-xxx]`) pour éviter les doublons.
  * Retourne le nombre d'issues créées.
  */
 export async function syncBacklogToGitHub(
   backlog: Backlog,
   repoUrl: string,
   token: string,
+  options?: { backlogRelativePath?: string },
 ): Promise<number> {
+  const docId = backlog.backlogDocumentId?.trim();
+  if (!docId) {
+    throw new Error(
+      "syncBacklogToGitHub : backlog sans backlogDocumentId — ouvre le fichier avec loadBacklog pour migrer.",
+    );
+  }
+  const backlogCtx: GitHubIssueBacklogContext = {
+    backlogDocumentId: docId,
+    backlogRelativePath: options?.backlogRelativePath?.trim() || "backlog.json",
+  };
   const ownerRepo = extractOwnerRepo(repoUrl);
+
+  // Récupère toutes les issues GitHub existantes pour déduplication par id interne.
+  const existingGhIssues = await fetchAllGitHubIssues(ownerRepo, token);
+  const ghByIssueId = new Map<string, number>();
+  for (const gh of existingGhIssues) {
+    const m = gh.title.match(/^\[([^\]]+)\]/);
+    if (m) ghByIssueId.set(m[1], gh.number);
+  }
+
+  // Relie les issues backlog dont githubIssueNumber est absent mais qui existent déjà.
+  const now = new Date().toISOString();
+  let relinked = 0;
+  for (const issue of backlog.issues) {
+    if (!issue.githubIssueNumber && ghByIssueId.has(issue.id)) {
+      issue.githubIssueNumber = ghByIssueId.get(issue.id)!;
+      issue.updatedAt = now;
+      console.log(`   🔗 #${issue.githubIssueNumber} — [${issue.id}] déjà sur GitHub (lien rétabli)`);
+      relinked++;
+    }
+  }
+  if (relinked > 0) console.log(`   ${relinked} issue(s) reliée(s) sans création.\n`);
+
   const pending = backlog.issues.filter(
     i => !i.githubIssueNumber && i.priority !== "WONT" && i.status !== "done" && i.status !== "skipped",
   );
@@ -218,7 +273,7 @@ export async function syncBacklogToGitHub(
   let created = 0;
   for (const issue of pending) {
     try {
-      const number = await createGitHubIssue(ownerRepo, token, issue);
+      const number = await createGitHubIssue(ownerRepo, token, issue, backlogCtx);
       issue.githubIssueNumber = number;
       issue.updatedAt = new Date().toISOString();
       console.log(`   ✅ #${number} — [${issue.id}] ${issue.title}`);

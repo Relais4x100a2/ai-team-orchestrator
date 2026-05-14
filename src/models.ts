@@ -57,6 +57,36 @@ export interface Backlog {
   version: number;
   lastUpdated: string;
   issues: BacklogIssue[];
+  /**
+   * Identifiant stable du fichier backlog (ULID). Absent dans les JSON legacy :
+   * assigné automatiquement par `loadBacklog` (migration write-on-read).
+   */
+  backlogDocumentId?: string;
+  /** Libellé optionnel pour le slug de branche Git `backlog/<id>-<slug>`. */
+  themeLabel?: string;
+}
+
+/** Crockford base32 : 26 caractères (ULID). */
+const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
+
+export function isValidBacklogDocumentId(id: string): boolean {
+  return typeof id === "string" && ULID_RE.test(id.trim());
+}
+
+export function parseCoverageLinesPct(value: unknown, fieldLabel: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${fieldLabel} : nombre entre 0 et 100 attendu`);
+  }
+  if (value < 0 || value > 100) {
+    throw new Error(`${fieldLabel} : doit être entre 0 et 100`);
+  }
+  return value;
+}
+
+export function formatProjectCoverageTargetLine(coverageLinesPct?: number): string {
+  if (coverageLinesPct === undefined) return "";
+  return `\n**Couverture lignes (cible) :** ${coverageLinesPct}%`;
 }
 
 export interface ProjectContext {
@@ -70,6 +100,8 @@ export interface ProjectContext {
   projectDataDir?: string;
   /** Fichier markdown de contexte long résolu (pour diagnostics). */
   projectContextPath?: string;
+  /** Objectif de couverture lignes (0–100) pour les tests du dépôt cible. */
+  coverageLinesPct?: number;
 }
 
 export interface PipelineRun {
@@ -203,6 +235,15 @@ function validateBacklogIssue(raw: unknown, index: number): BacklogIssue {
             throw new Error(`issues[${index}].reflectionChallenge : chaîne attendue`);
           })();
 
+  let githubIssueNumber: number | undefined;
+  if (o.githubIssueNumber !== undefined) {
+    const n = o.githubIssueNumber;
+    if (typeof n !== "number" || !Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+      throw new Error(`issues[${index}].githubIssueNumber : entier positif obligatoire`);
+    }
+    githubIssueNumber = n;
+  }
+
   return {
     id: id.trim(),
     title: title.trim(),
@@ -214,6 +255,7 @@ function validateBacklogIssue(raw: unknown, index: number): BacklogIssue {
     updatedAt,
     completedAt,
     pipelineRun,
+    ...(githubIssueNumber !== undefined ? { githubIssueNumber } : {}),
     source,
     architectureVision,
     architectureAlternative,
@@ -256,7 +298,24 @@ export function parseBacklogJson(raw: unknown, sourceLabel = "backlog.json"): Ba
     ids.add(issue.id);
   }
 
-  return { version, lastUpdated, issues };
+  let backlogDocumentId: string | undefined;
+  if (o.backlogDocumentId !== undefined) {
+    if (typeof o.backlogDocumentId !== "string" || !isValidBacklogDocumentId(o.backlogDocumentId)) {
+      throw new Error(`${sourceLabel}.backlogDocumentId : ULID (26 caractères) obligatoire si présent`);
+    }
+    backlogDocumentId = o.backlogDocumentId.trim();
+  }
+
+  let themeLabel: string | undefined;
+  if (o.themeLabel !== undefined) {
+    if (typeof o.themeLabel !== "string") {
+      throw new Error(`${sourceLabel}.themeLabel : chaîne attendue`);
+    }
+    const t = o.themeLabel.trim();
+    themeLabel = t.length ? t : undefined;
+  }
+
+  return { version, lastUpdated, issues, backlogDocumentId, themeLabel };
 }
 
 /** Résout un chemin de brief : absolu normalisé ou relatif au cwd. */

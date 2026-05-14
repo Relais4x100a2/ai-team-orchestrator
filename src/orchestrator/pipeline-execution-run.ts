@@ -1,7 +1,5 @@
 import { PIPELINE_STEPS, type PipelineStep } from "../agent-config.js";
-import type { BacklogIssue, IssueSize } from "../backlog.js";
-import { pickNextIssue } from "../backlog.js";
-import { closeGitHubIssueWithComment, fetchIssueComments, formatIssueCommentsForBrief } from "../github-sync.js";
+import type { IssueSize } from "../backlog.js";
 import {
   detectQAVerdict,
   detectSecurityVerdict,
@@ -15,66 +13,23 @@ import { newPipelineRunId } from "../models.js";
 import { buildQAPipelineContext, buildSecurityImplementationContext } from "./context-builders.js";
 import {
   extractHandoffSection,
-  formatErrorMessage,
-  isDevPipelineOutputTooWeak,
   trimContext,
   warnIfHandoffFallback,
 } from "./paths-and-env.js";
-import { detectGitHubPrUrl, loadLastRunContext, resolveLastRunDir } from "./run-context.js";
-import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
+import { detectGitHubPrUrl } from "./run-context.js";
 import { runAgent, resolveCloudMode } from "./agent-runner.js";
-import { runArchitectForBacklogReflection } from "./pipeline-backlog.js";
+import { assertDevOutputSufficientForSecurityAndQA } from "./pipeline-dev-guards.js";
+import { isPipelineArchitectCloud } from "./pipeline-github-env.js";
+import type { PipelineExecutionOutcome, RunExecutionPipelineOptions } from "./pipeline-types.js";
 import type { OrchestratorSession } from "./session.js";
+import { isGithubMergePrOnCiOkEnabled } from "../github-pr-pipeline.js";
 
-function isPipelineArchitectCloud(): boolean {
-  const v = process.env.PIPELINE_ARCHITECT_CLOUD?.trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
-}
-
-function isGithubCloseIssueOnPipelineDoneEnabled(): boolean {
-  const v = process.env.GITHUB_CLOSE_ISSUE_ON_PIPELINE_DONE?.trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
-}
-
-function githubPipelineCloseComment(issue: BacklogIssue): string {
-  return [
-    "Fermé automatiquement après `pipeline next` réussi (ai-team-orchestrator).",
-    `- Backlog id : \`${issue.id}\``,
-    `- pipelineRun : \`${issue.pipelineRun ?? "—"}\``,
-  ].join("\n");
-}
-
-function resolvePrUrlForDevOutputGate(
-  session: OrchestratorSession,
-  implementation: string,
-  detectedPrUrl: string | undefined,
-): string | undefined {
-  const fromText = detectGitHubPrUrl(implementation);
-  if (fromText) return fromText;
-  const fromArg = detectedPrUrl?.trim();
-  if (fromArg) return fromArg;
-  if (session.activeProjectSlug) {
-    const ctx = loadLastRunContext(resolveLastRunDir(session));
-    const u = ctx?.latestPrUrl?.trim();
-    if (u) return u;
-  }
-  return undefined;
-}
-
-/** Évite sécurité / QA sur une sortie dev vide ou sans PR ni handoff exploitable. */
-function assertDevOutputSufficientForSecurityAndQA(
-  session: OrchestratorSession,
-  implementation: string,
-  detectedPrUrl: string | undefined,
-  label: string,
-): void {
-  const pr = resolvePrUrlForDevOutputGate(session, implementation, detectedPrUrl);
-  if (!isDevPipelineOutputTooWeak(implementation, { prUrl: pr })) return;
-  const msg =
-    "Sortie développeur insuffisante pour enchaîner sécurité / QA : texte quasi vide, pas de section «## Handoff Security & QA» exploitable, aucune URL de PR dans la sortie ni dans run-context.json. Vérifier l'agent dev ou relancer.";
-  console.error(`❌ ${label}\n   ${msg}`);
-  throw new Error(msg);
-}
+const EXECUTION_STEP_LABEL: Record<"architect" | "dev" | "security" | "qa", string> = {
+  architect: "Architect",
+  dev: "Dev",
+  security: "Sécurité",
+  qa: "QA",
+};
 
 async function runArchitectForTicketExecution(
   session: OrchestratorSession,
@@ -83,7 +38,6 @@ async function runArchitectForTicketExecution(
   issueSize: IssueSize | undefined,
   issueLabel?: string,
 ): Promise<string> {
-  // Si pas de localPath, forcer cloud même si PIPELINE_ARCHITECT_CLOUD=false
   const useCloud = isPipelineArchitectCloud() || resolveCloudMode(session, "architect");
   const task = issueLabel
     ? `Fournis un cadrage architecture ciblé pour ${issueLabel} (contraintes, risques, points d'attention).`
@@ -111,121 +65,12 @@ async function runArchitectForTicketExecution(
   return out;
 }
 
-export async function pipelineNext(session: OrchestratorSession): Promise<void> {
-  const backlog = loadBacklog(session);
-  const issue = pickNextIssue(backlog);
-
-  if (!issue) {
-    console.log("🎉 Backlog vide — aucune issue à traiter (todo + non-WONT).");
-    printBacklogSummary(session, backlog);
-    return;
-  }
-
-  console.log(`\n▶ Issue sélectionnée : [${issue.id}] ${issue.title}`);
-  console.log(`  Priorité: ${issue.priority} | Taille: ${issue.size}`);
-  console.log("─".repeat(60));
-
-  issue.status = "in_progress";
-  issue.updatedAt = new Date().toISOString();
-  const pipelineRunId = newPipelineRunId();
-  issue.pipelineRun = pipelineRunId;
-  saveBacklog(session, backlog);
-
-  const issueRef = issue.githubIssueNumber
-    ? `\n\nCette implémentation doit refermer l'issue GitHub #${issue.githubIssueNumber} — inclure \`close #${issue.githubIssueNumber}\` dans le message de commit ou la description de PR.`
-    : "";
-
-  // Enrichissement : commentaires GitHub comme contexte pour les agents
-  let githubCommentsBlock = "";
-  {
-    const ghNum = issue.githubIssueNumber;
-    const repo = session.activeProject?.repo?.trim();
-    const ghToken = process.env.GITHUB_TOKEN?.trim();
-    if (ghNum != null && repo && ghToken) {
-      try {
-        const comments = await fetchIssueComments(repo, ghToken, ghNum);
-        if (comments.length > 0) {
-          githubCommentsBlock = "\n\n" + formatIssueCommentsForBrief(ghNum, comments);
-          console.log(`   💬 ${comments.length} commentaire(s) GitHub récupéré(s) pour #${ghNum}`);
-        }
-      } catch (e) {
-        console.warn(`   ⚠️  Commentaires GitHub #${ghNum} : ${formatErrorMessage(e)}`);
-      }
-    }
-  }
-
-  try {
-    const executionStartBySize: Record<IssueSize, PipelineStep> = {
-      S: "dev",
-      M: "architect",
-      L: "architect",
-      XL: "architect",
-    };
-    const executionStart = executionStartBySize[issue.size];
-    await fullPipeline(session, issue.description + issueRef + githubCommentsBlock, {
-      pipelineRunId,
-      issueSize: issue.size,
-      resumeFrom: executionStart,
-      mode: "execution",
-      startReason: `routing pipeline next (taille ${issue.size})`,
-      executionIssueInfo: { id: issue.id, title: issue.title, priority: issue.priority, size: issue.size },
-      executionIssueBacklogFields:
-        issue.architectureVision || issue.reflectionChallenge
-          ? {
-              architectureVision: issue.architectureVision,
-              reflectionChallenge: issue.reflectionChallenge,
-            }
-          : undefined,
-    });
-
-    const freshBacklog = loadBacklog(session);
-    const freshIssue = freshBacklog.issues.find((i) => i.id === issue.id)!;
-    freshIssue.status = "done";
-    freshIssue.completedAt = new Date().toISOString();
-    freshIssue.updatedAt = new Date().toISOString();
-    saveBacklog(session, freshBacklog);
-
-    const ghNum = freshIssue.githubIssueNumber;
-    const repo = session.activeProject?.repo?.trim();
-    const ghToken = process.env.GITHUB_TOKEN?.trim();
-    if (isGithubCloseIssueOnPipelineDoneEnabled() && ghNum != null && repo && ghToken) {
-      try {
-        await closeGitHubIssueWithComment(repo, ghToken, ghNum, githubPipelineCloseComment(freshIssue));
-      } catch (e) {
-        console.warn(`GitHub fermeture automatique : ${formatErrorMessage(e)}`);
-      }
-    }
-
-    console.log(`\n✅ Issue ${issue.id} marquée DONE dans backlog.json`);
-  } catch (err) {
-    const freshBacklog = loadBacklog(session);
-    const freshIssue = freshBacklog.issues.find((i) => i.id === issue.id)!;
-    freshIssue.status = "todo";
-    freshIssue.pipelineRun = null;
-    freshIssue.updatedAt = new Date().toISOString();
-    saveBacklog(session, freshBacklog);
-    throw err;
-  }
-}
-
-export async function fullPipeline(
+export async function runExecutionPipeline(
   session: OrchestratorSession,
   brief: string,
-  opts: {
-    resumeFrom?: PipelineStep;
-    pipelineRunId?: string;
-    issueSize?: IssueSize;
-    mode?: "full" | "execution";
-    startReason?: string;
-    executionIssueBacklogFields?: {
-      architectureVision?: string;
-      reflectionChallenge?: string;
-    };
-    executionIssueInfo?: { id: string; title: string; priority: string; size: string };
-  } = {},
-): Promise<void> {
-  const isExecutionOnly = opts.mode === "execution";
-  const defaultStart = isExecutionOnly ? "dev" : "pm";
+  opts: RunExecutionPipelineOptions = {},
+): Promise<PipelineExecutionOutcome> {
+  const defaultStart: PipelineStep = "dev";
   const resumeFrom = opts.resumeFrom ?? defaultStart;
   const startIdx = PIPELINE_STEPS.indexOf(resumeFrom);
   const runId = opts.pipelineRunId ?? newPipelineRunId();
@@ -248,27 +93,18 @@ export async function fullPipeline(
   let securityEscalated = false;
   let mediumSecurityNotes = false;
   let runStatus: PipelineRunStatus = "success";
+  let lastQaVerdict = null as PipelineExecutionOutcome["lastQaVerdict"];
+  let lastSecurityVerdict = null as PipelineExecutionOutcome["lastSecurityVerdict"];
+  let detectedPrUrl: string | undefined;
 
   const briefForRecord =
     brief.length > 50_000 ? `${brief.slice(0, 50_000)}\n\n[… tronqué pour pipeline-runs.json …]` : brief;
 
   const pipelineIssueSize = opts.issueSize;
-  const stepLabel: Record<PipelineStep, string> = {
-    pm: "PM",
-    architect: "Architect",
-    redteam_reflection: "Red Team Réflexion",
-    dev: "Dev",
-    security: "Sécurité",
-    qa: "QA",
-  };
 
   try {
     console.log("═".repeat(60));
-    console.log(
-      isExecutionOnly
-        ? "🏗️  PIPELINE NEXT — Exécution Backlog -> QA"
-        : "🏗️  PIPELINE FULL — Réflexion -> Backlog -> Exécution -> QA",
-    );
+    console.log("🏗️  PIPELINE NEXT — Exécution Backlog -> QA");
     if (pipelineIssueSize) {
       console.log(`   📐 Taille issue (grille modèles) : ${pipelineIssueSize}`);
     }
@@ -277,16 +113,15 @@ export async function fullPipeline(
       console.log(`   ⏩ Démarrage depuis : ${resumeFrom.toUpperCase()} (${reason})`);
     }
     const plannedSteps = PIPELINE_STEPS.filter(
-      (step) => stepLabel[step] && PIPELINE_STEPS.indexOf(step) >= startIdx,
+      (step) => step in EXECUTION_STEP_LABEL && PIPELINE_STEPS.indexOf(step) >= startIdx,
     )
-      .filter((step) => !isExecutionOnly || ["architect", "dev", "security", "qa"].includes(step))
-      .map((step) => stepLabel[step])
+      .map((step) => EXECUTION_STEP_LABEL[step as keyof typeof EXECUTION_STEP_LABEL])
       .join(" -> ");
     console.log(`   🗺️  Plan d'exécution : ${plannedSteps}`);
     console.log("═".repeat(60));
 
     let specs = brief;
-    if (isExecutionOnly && opts.executionIssueBacklogFields) {
+    if (opts.executionIssueBacklogFields) {
       const f = opts.executionIssueBacklogFields;
       const blocks: string[] = [];
       if (f.architectureVision?.trim()) {
@@ -301,61 +136,29 @@ export async function fullPipeline(
     }
 
     let architectureVision = "";
-    let reflectionChallenge = "";
-
-    if (!isExecutionOnly && startIdx <= 0) {
-      console.log("\n📋 ÉTAPE 1/6 — Product Manager (Réflexion -> Backlog)");
-      const pmOutput = await runAgent(
-        session,
-        "pm",
-        "Formalise le backlog (Must/Should/Could/Wont) en distinguant explicitement la provenance top_down ou bottom_up de chaque item.",
-        { additionalContext: brief, frugal, issueSize: pipelineIssueSize },
-      );
-      if (pmOutput.trim()) {
-        specs = pmOutput;
-      }
-    } else if (!isExecutionOnly) {
-      console.log("\n📋 ÉTAPE 1/6 — Product Manager : ⏭  ignoré (--resume-from)");
-    }
+    const reflectionChallenge = "";
 
     if (startIdx <= 1) {
-      console.log("\n🏛️  ÉTAPE 2/6 — Data Architect");
-      if (isExecutionOnly) {
-        architectureVision = await runArchitectForTicketExecution(session, specs, frugal, pipelineIssueSize, issueLabel ?? undefined);
-      } else {
-        architectureVision = await runArchitectForBacklogReflection(session, specs, frugal, pipelineIssueSize);
-      }
-    } else if (!isExecutionOnly) {
-      console.log("\n🏛️  ÉTAPE 2/6 — Data Architect : ⏭  ignoré (--resume-from)");
-    }
-
-    if (!isExecutionOnly && startIdx <= 2) {
-      console.log("\n🧠 ÉTAPE 3/6 — Red Team Réflexion");
-      reflectionChallenge = await runAgent(
+      console.log("\n🏛️  ÉTAPE — Data Architect");
+      architectureVision = await runArchitectForTicketExecution(
         session,
-        "redteam_reflection",
-        "Challenge la cohérence produit/architecture, explicite les hypothèses à risque et propose des alternatives actionnables pour backlog Must/Should.",
-        {
-          additionalContext: `## Specs backlog\n${specs}\n\n## Vision architecture\n${architectureVision}`,
-          frugal,
-          issueSize: pipelineIssueSize,
-        },
+        specs,
+        frugal,
+        pipelineIssueSize,
+        issueLabel ?? undefined,
       );
-    } else if (!isExecutionOnly) {
-      console.log("\n🧠 ÉTAPE 3/6 — Red Team Réflexion : ⏭  ignoré (--resume-from)");
+    } else {
+      console.log("\n🏛️  ÉTAPE — Data Architect : ⏭  ignoré (--resume-from)");
     }
 
     const archExtract = extractHandoffSection(architectureVision, "## Handoff Dev — Architecture");
     warnIfHandoffFallback("Vision architecture (étape architecte)", architectureVision, "## Handoff Dev — Architecture", archExtract);
-    const archHandoff =
-      archExtract || (architectureVision ? trimContext(architectureVision, 1500) : "");
+    const archHandoff = archExtract || (architectureVision ? trimContext(architectureVision, 1500) : "");
 
     const redteamExtract = extractHandoffSection(reflectionChallenge, "## Handoff Dev — Produit");
     warnIfHandoffFallback("Red team réflexion", reflectionChallenge, "## Handoff Dev — Produit", redteamExtract);
-    const redteamHandoff =
-      redteamExtract || (reflectionChallenge ? trimContext(reflectionChallenge, 1000) : "");
+    const redteamHandoff = redteamExtract || (reflectionChallenge ? trimContext(reflectionChallenge, 1000) : "");
 
-    // Pour size S (pas d'architecte dans ce run), récupérer les champs backlog
     const backlogArchCtx =
       !architectureVision && opts.executionIssueBacklogFields?.architectureVision
         ? `## Contexte architecture (backlog)\n${opts.executionIssueBacklogFields.architectureVision}`
@@ -374,7 +177,7 @@ export async function fullPipeline(
       .join("\n\n");
 
     if (startIdx <= 3) {
-      console.log("\n💻 ÉTAPE 4/6 — Développeur Full-Stack");
+      console.log("\n💻 ÉTAPE — Développeur Full-Stack");
       if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
     }
 
@@ -390,7 +193,7 @@ export async function fullPipeline(
           )
         : brief;
 
-    let detectedPrUrl: string | undefined = detectGitHubPrUrl(implementation);
+    detectedPrUrl = detectGitHubPrUrl(implementation);
     if (detectedPrUrl) console.log(`   🔗 PR détectée : ${detectedPrUrl}`);
 
     let securityApproved = startIdx > 4;
@@ -398,11 +201,11 @@ export async function fullPipeline(
     let securityReport = "";
 
     if (startIdx > 4) {
-      console.log("\n🔐 ÉTAPE 5/6 — Sécurité : ⏭  ignoré (--resume-from)");
+      console.log("\n🔐 ÉTAPE — Sécurité : ⏭  ignoré (--resume-from)");
     } else {
       while (!securityApproved && securityIteration < maxSecurityIterations) {
         securityIteration++;
-        console.log(`\n🔐 ÉTAPE 5/6 — Sécurité — itération ${securityIteration}/${maxSecurityIterations}`);
+        console.log(`\n🔐 ÉTAPE — Sécurité — itération ${securityIteration}/${maxSecurityIterations}`);
         if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
 
         const securityPrompt =
@@ -427,25 +230,21 @@ export async function fullPipeline(
           implHandoffSecurity,
         );
 
-        securityReport = await runAgent(
-          session,
-          "security",
-          securityPrompt,
-          {
-            additionalContext: buildSecurityImplementationContext(
-              session,
-              implHandoffSecurity || trimContext(implementation, 2000),
-              detectedPrUrl,
-              trimContext(brief, 800),
-            ),
-            cloud: true,
-            frugal,
-            issueSize: pipelineIssueSize,
-            earlyStop: hasDefinitiveSecurityVerdict,
-          },
-        );
+        securityReport = await runAgent(session, "security", securityPrompt, {
+          additionalContext: buildSecurityImplementationContext(
+            session,
+            implHandoffSecurity || trimContext(implementation, 2000),
+            detectedPrUrl,
+            trimContext(brief, 800),
+          ),
+          cloud: true,
+          frugal,
+          issueSize: pipelineIssueSize,
+          earlyStop: hasDefinitiveSecurityVerdict,
+        });
 
         const securityVerdict = detectSecurityVerdict(securityReport);
+        lastSecurityVerdict = securityVerdict;
         console.log(`   📋 Verdict sécurité (détecté) : ${securityVerdict}`);
         if (securityVerdict === "APPROVED") {
           securityApproved = true;
@@ -459,9 +258,7 @@ export async function fullPipeline(
             {
               additionalContext:
                 devContext +
-                (implementation
-                  ? `\n\n## Implémentation précédente\n${trimContext(implementation, 3000)}`
-                  : ""),
+                (implementation ? `\n\n## Implémentation précédente\n${trimContext(implementation, 3000)}` : ""),
               cloud: true,
               autoCreatePR: false,
               frugal,
@@ -482,7 +279,7 @@ export async function fullPipeline(
     }
 
     const qaIssueBacklogSections: string[] = [];
-    if (isExecutionOnly && opts.executionIssueBacklogFields) {
+    if (opts.executionIssueBacklogFields) {
       const f = opts.executionIssueBacklogFields;
       if (f.architectureVision?.trim()) {
         qaIssueBacklogSections.push(
@@ -502,7 +299,7 @@ export async function fullPipeline(
 
     while (!qaApproved && qaIteration < maxQAIterations) {
       qaIteration++;
-      console.log(`\n🧪 ÉTAPE 6/6 — QA Engineer — itération ${qaIteration}/${maxQAIterations}`);
+      console.log(`\n🧪 ÉTAPE — QA Engineer — itération ${qaIteration}/${maxQAIterations}`);
       if (frugal) console.warn("   ⚠️  Mode frugal activé pour cette étape.");
 
       const qaPrompt =
@@ -527,32 +324,28 @@ export async function fullPipeline(
         implHandoffQa,
       );
 
-      qaReport = await runAgent(
-        session,
-        "qa",
-        qaPrompt,
-        {
-          additionalContext: buildQAPipelineContext(
-            session,
-            [
-              `## Issue implémentée\n${brief}`,
-              ...qaIssueBacklogSections,
-              archHandoff || null,
-              securityReport ? `## Rapport sécurité\n${trimContext(securityReport, 1500)}` : null,
-              `## Implémentation\n${implHandoffQa || trimContext(implementation, 2000)}`,
-            ]
-              .filter(Boolean)
-              .join("\n\n"),
-            detectedPrUrl,
-          ),
-          cloud: true,
-          frugal,
-          issueSize: pipelineIssueSize,
-          earlyStop: hasDefinitiveQAVerdict,
-        },
-      );
+      qaReport = await runAgent(session, "qa", qaPrompt, {
+        additionalContext: buildQAPipelineContext(
+          session,
+          [
+            `## Issue implémentée\n${brief}`,
+            ...qaIssueBacklogSections,
+            archHandoff || null,
+            securityReport ? `## Rapport sécurité\n${trimContext(securityReport, 1500)}` : null,
+            `## Implémentation\n${implHandoffQa || trimContext(implementation, 2000)}`,
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+          detectedPrUrl,
+        ),
+        cloud: true,
+        frugal,
+        issueSize: pipelineIssueSize,
+        earlyStop: hasDefinitiveQAVerdict,
+      });
 
       const verdict = detectQAVerdict(qaReport);
+      lastQaVerdict = verdict;
       console.log(`   📋 Verdict QA (détecté) : ${verdict}`);
       if (verdict === "APPROVE") {
         qaApproved = true;
@@ -574,10 +367,7 @@ export async function fullPipeline(
         `Corrige les problèmes soulevés par QA dans la revue précédente :\n\n${trimContext(qaReport, 4000)}\n\nMet à jour la PR avec les changements.`,
         {
           additionalContext:
-            devContext +
-            (implementation
-              ? `\n\n## Implémentation précédente\n${trimContext(implementation, 3000)}`
-              : ""),
+            devContext + (implementation ? `\n\n## Implémentation précédente\n${trimContext(implementation, 3000)}` : ""),
           cloud: true,
           autoCreatePR: false,
           frugal,
@@ -620,6 +410,7 @@ export async function fullPipeline(
       );
       securityReport = securityAfterQaFix;
       const securityVerdict = detectSecurityVerdict(securityAfterQaFix);
+      lastSecurityVerdict = securityVerdict;
       console.log(`   📋 Verdict sécurité (détecté) : ${securityVerdict}`);
       if (securityVerdict === "CRITICAL_ISSUES") {
         implementation = await runAgent(
@@ -628,10 +419,7 @@ export async function fullPipeline(
           `Corrige les vulnérabilités critiques apparues après corrections QA :\n\n${trimContext(securityAfterQaFix, 3000)}`,
           {
             additionalContext:
-              devContext +
-              (implementation
-                ? `\n\n## Implémentation précédente\n${trimContext(implementation, 3000)}`
-                : ""),
+              devContext + (implementation ? `\n\n## Implémentation précédente\n${trimContext(implementation, 3000)}` : ""),
             cloud: true,
             autoCreatePR: false,
             frugal,
@@ -652,32 +440,28 @@ export async function fullPipeline(
     console.log("\n" + "═".repeat(60));
     console.log("📊 PIPELINE TERMINÉ — Résumé");
     console.log("═".repeat(60));
-    if (isExecutionOnly) {
-      if (!skipped("architect")) {
-        console.log("1. Cadrage architecture      : ✅ effectué");
-      }
-      console.log("2. Implémentation            : ✅ PR mise à jour");
-      console.log(
-        `3. Sécurité                  : ✅ complétée (${securityIteration} itération${securityIteration > 1 ? "s" : ""})`,
-      );
-      console.log(
-        `4. Review QA                 : ✅ approuvée (${qaIteration} itération${qaIteration > 1 ? "s" : ""})`,
-      );
-    } else {
-      console.log(`1. Backlog PM                : ${skipped("pm") ? "⏭  ignoré" : "✅ formalisé"}`);
-      console.log(`2. Vision architecture       : ${skipped("architect") ? "⏭  ignoré" : "✅ cadrée"}`);
-      console.log(
-        `3. Red Team réflexion        : ${skipped("redteam_reflection") ? "⏭  ignoré" : "✅ challenge produit/archi"}`,
-      );
-      console.log(`4. Implémentation            : ${skipped("dev") ? "⏭  ignoré" : "✅ PR mise à jour"}`);
-      console.log(
-        `5. Sécurité                  : ${skipped("security") ? "⏭  ignoré" : `✅ complétée (${securityIteration} itération${securityIteration > 1 ? "s" : ""})`}`,
-      );
-      console.log(
-        `6. Review QA                 : ${skipped("qa") ? "⏭  ignoré" : `✅ approuvée (${qaIteration} itération${qaIteration > 1 ? "s" : ""})`}`,
-      );
+    if (!skipped("architect")) {
+      console.log("1. Cadrage architecture      : ✅ effectué");
     }
-    console.log("\n👉 Va sur GitHub pour review final et merger la PR.");
+    console.log("2. Implémentation            : ✅ PR mise à jour");
+    console.log(
+      `3. Sécurité                  : ✅ complétée (${securityIteration} itération${securityIteration > 1 ? "s" : ""})`,
+    );
+    console.log(
+      `4. Review QA                 : ✅ approuvée (${qaIteration} itération${qaIteration > 1 ? "s" : ""})`,
+    );
+    if (!isGithubMergePrOnCiOkEnabled()) {
+      console.log("\n👉 Va sur GitHub pour review final et merger la PR.");
+    }
+    return {
+      runStatus,
+      qaEscalated,
+      securityEscalated,
+      mediumSecurityNotes,
+      lastQaVerdict,
+      lastSecurityVerdict,
+      detectedPrUrl,
+    };
   } catch (e) {
     runStatus = "failed";
     throw e;

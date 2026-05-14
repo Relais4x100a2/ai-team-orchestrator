@@ -5,11 +5,11 @@
 Ceci est un orchestrateur d'équipe de dev IA. Il utilise le Cursor SDK
 pour piloter des agents spécialisés sur un repo GitHub cible.
 
-**Pipeline par défaut (`full`) :** PM → architecte → red team réflexion → dev ⇄ sécurité ⇄ QA (sécurité avant QA, variante A).
+**Exécution ticket (`pipeline next`) :** architecte (M/L/XL) → dev ⇄ sécurité ⇄ QA (sécurité avant QA, variante A). Réflexion backlog : `--pipeline backlog` forward | backward (PM + architecte + red team réflexion).
 
 **Pipeline backlog (`--pipeline backlog` forward | backward) :** les champs `architectureVision` et `reflectionChallenge` persistés dans `backlog.json` sur les issues MUST/SHOULD sont **une paire unique par run**, répliée sur **tout le batch** d’issues produit par le parse de la synthèse PM — cadre transverse du run, pas un résumé par story. Le détail par ticket vit dans `description` et le brief d’exécution (`pipeline next`).
 
-**Agents hors pipeline `full` (invocation manuelle)** : `ux`, `ui`, `devops`, `sre`, `release`, `techwriter`, `privacy` — même injection de contexte que les autres agents quand `--project` est utilisé.
+**Agents hors exécution ticket (invocation manuelle)** : `ux`, `ui`, `devops`, `sre`, `release`, `techwriter`, `privacy` — même injection de contexte que les autres agents quand `--project` est utilisé.
 
 ## Stack
 
@@ -21,6 +21,9 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
   - `CURSOR_API_KEY` — obligatoire pour lancer les agents
   - `TARGET_REPO_URL`, `TARGET_BRANCH` — fallback si pas de `--project` (mode cloud)
   - `GITHUB_TOKEN` — pour `--sync-issues` (API Issues) et, si `GITHUB_CLOSE_ISSUE_ON_PIPELINE_DONE=1` (opt-in), fermeture automatique de l’issue GitHub après un `pipeline next` réussi (`src/github-sync.ts`, `src/orchestrator/workflows.ts`)
+  - `GITHUB_SYNC_BACKLOG_DOCUMENT_LABEL` — si `1`/`true`/`yes`, ajoute le label `backlog:<backlogDocumentId>` à la création d’issue GitHub (`--sync-issues`) ; défaut : corps d’issue uniquement (document id + chemin relatif vers `backlog.json`).
+  - `RUNS_CLEANUP_ON_ISSUE_DONE` — si `1`/`true`/`yes`, supprime après un `pipeline next` réussi le dossier `runs/<backlogDocumentId>/<issueId>/` sous le répertoire de données (opt-in, destruction d’artefacts).
+  - `RUNS_CLEANUP_ON_SKIPPED` — idem pour les issues passées en `skipped` si tu branches cette logique sur le nettoyage (`src/orchestrator/runs-cleanup.ts`).
   - `CURSOR_BILLING_MODE` — `solo` (défaut recommandé Pro/Pro+/Ultra) ou `team`.
   - `FRUGAL_DEFAULT` — override explicite (`true|false`) du mode frugal.
   - `SPEND_ALERT_CENTS` — seuil Team (centimes) ; au-delà, **mode frugal** : tous les agents utilisent `composer-2` (`src/spend-guard.ts`). Optionnel : `SPEND_CHECK_EMAIL` pour filtrer la dépense par utilisateur.
@@ -60,8 +63,7 @@ npm run migrate:project-context  # Corps des projects/*.md avec local_path → c
 
 npm run start        # Aide interactive + liste des rôles (--role)
 
-# Pipeline full : PM → Architect → Red Team Réflexion → Dev ⇄ Sécurité ⇄ QA
-npm run pipeline     # équivalent à --pipeline full
+# Exécution ticket : architecte (M/L/XL) → dev ⇄ sécurité ⇄ QA
 npm run pipeline:next # prochaine issue du backlog.json
 npm run project -- monprojet --pipeline backlog forward "Meta-vision"
 npm run project -- monprojet --pipeline backlog backward "Feedback"
@@ -90,9 +92,10 @@ npm run agent:privacy
 
 | Option | Rôle |
 |--------|------|
-| `--project <fichier>` | Charge `projects/…`. Sorties agents + backlog : `last-run/<slug>/` sans `local_path` ; avec `local_path`, sous `<local_path>/<project_data_dir>/` (défaut `.ai-team-orchestrator`). |
+| `--project <fichier>` | Charge `projects/…`. `backlog.json` + `run-context.json` : `last-run/<slug>/` sans `local_path` ; avec `local_path`, sous `<local_path>/<project_data_dir>/` (défaut `.ai-team-orchestrator`). Sur **`pipeline next`**, les sorties agents d’exécution ticket sont sous `runs/<backlogDocumentId>/<issueId>/<role>.md` dans ce même répertoire. |
+| `--backlog-id <ULID>` | Vérifie que le fichier `backlog.json` chargé a ce `backlogDocumentId` (après migration automatique si besoin). |
 | `--brief-file <fichier>` | Brief ou tâche lus depuis un fichier (chemins relatifs au cwd ou absolus). Peut pointer vers `pm.md` du répertoire de données (orchestrateur ou dépôt cible). |
-| `--resume-from <étape>` | Reprend le pipeline : `pm` \| `architect` \| `redteam_reflection` \| `dev` \| `security` \| `qa`. Le brief fourni remplace le contexte des étapes ignorées. (`pipeline next` démarre par défaut en exécution: `dev` pour `S`, `architect` pour `M/L/XL`) |
+| `--resume-from <étape>` | Avec `--pipeline next` uniquement : `architect` \| `dev` \| `security` \| `qa`. Point d’entrée par défaut : `dev` pour `S`, `architect` pour `M/L/XL`. |
 | `--sync-issues` | Crée les issues GitHub manquantes depuis `backlog.json`. Exige `--project` avec `repo:` dans le frontmatter et `GITHUB_TOKEN` dans `.env`. |
 
 Exemples :
@@ -100,7 +103,7 @@ Exemples :
 ```bash
 npm run project -- dataset-style --role devops "Proposer CI pour le repo du frontmatter"
 
-npm run project -- dataset-style --pipeline full --brief-file last-run/dataset-style/pm.md --resume-from architect
+npm run project -- dataset-style --pipeline next --resume-from architect
 
 tsx src/orchestrator.ts --project projects/mon-projet.md --sync-issues
 ```
@@ -110,11 +113,14 @@ tsx src/orchestrator.ts --project projects/mon-projet.md --sync-issues
 ## Structure
 
 - `src/orchestrator.ts` — Façade CLI (`dotenv`, `setupRipgrepPath`, `main()`)
-- `src/orchestrator/` — `fullPipeline`, `runAgent`, chargement projet / backlog, garde branche, sync git (`cli.ts`, `workflows.ts`, `agent-runner.ts`, …)
-- `src/orchestrator/session.ts` — Type `OrchestratorSession` + `emptyOrchestratorSession()` ; instance unique créée dans `cli.main()` et passée aux workflows et à `runAgent` (pas de singleton global mutable partagé entre modules).
+- `src/orchestrator/` — `pipelineNext`, `runAgent`, chargement projet / backlog, garde branche, sync git (`cli.ts`, `workflows.ts`, `agent-runner.ts`, …)
+- `src/orchestrator/session.ts` — Type `OrchestratorSession` + `emptyOrchestratorSession()` (`cliBacklogDocumentId`, chemins `runs/`, branche backlog) ; instance unique créée dans `cli.main()` et passée aux workflows et à `runAgent`.
+- `src/orchestrator/backlog-io.ts` — Chemins `backlog.json`, migration `backlogDocumentId`, `resolveBacklogRelativePathForSync`.
+- `src/orchestrator/backlog-work-branch.ts` — Branche Git locale `backlog/<ULID>-<slug>` au `pipeline next` si `local_path`.
+- `src/orchestrator/runs-cleanup.ts` — Suppression opt-in des artefacts `runs/…/<issueId>/` après clôture.
 - `src/agent-config.ts` — `AGENT_DEFINITIONS`, `promptFile`, résolution des modèles (`createAgentConfig`)
 - `src/models.ts` — Types partagés (`ProjectContext`, backlog, pipeline runs, parsing JSON)
-- `src/backlog.ts` — Parse sortie PM + sélection prochaine issue (`pickNextIssue`)
+- `src/backlog.ts` — Réexport des types backlog (`models`) ; parse sortie PM + `pickNextIssue`, `themeSourceForWorkBranch`
 - `src/pipeline-detection.ts` — Heuristiques `detectQAVerdict` / `detectSecurityVerdict` (dernière ligne `VERDICT QA:` / `VERDICT:` pour le QA ; `VERDICT SÉCURITÉ:` pour la sécurité)
 - `src/pipeline-runs.ts` — Persistance des exécutions dans `pipeline-runs.json` (racine du repo)
 - `src/github-sync.ts` — Création des issues GitHub depuis le backlog (`--sync-issues`)
@@ -122,8 +128,8 @@ tsx src/orchestrator.ts --project projects/mon-projet.md --sync-issues
 - `src/verify-prompts.ts` — Vérif présence des fichiers prompts (CI + `npm run verify:prompts`)
 - `src/prompts/*.md` — Prompts système génériques (liste dans le tableau ci-dessus)
 - `projects/*.md` — Fichiers de contexte projet (frontmatter ; corps optionnel si contexte dans le dépôt cible)
-- Répertoire **de données** par projet — Avec `--project` : `last-run/<slug>/` (sans `local_path`) **ou** `<local_path>/.ai-team-orchestrator/` par défaut : `backlog.json`, `run-context.json`, `<role>.md`, `context.md` (contexte long optionnel), `.gitignore` auto à la création
-- `pipeline-runs.json` — Journal des runs de `fullPipeline` (append)
+- Répertoire **de données** par projet — Avec `--project` : `last-run/<slug>/` (sans `local_path`) **ou** `<local_path>/.ai-team-orchestrator/` par défaut : `backlog.json` (champ `backlogDocumentId` ULID + option `themeLabel`), `run-context.json`, `runs/<id>/<issue>/` pendant l’exécution ticket, `context.md` (contexte long optionnel), `.gitignore` auto à la création. Les fichiers `<role>.md` à la racine du data dir restent possibles hors exécution `pipeline next`.
+- `pipeline-runs.json` — Journal des runs `pipeline next` (append)
 - `.cursor/mcp.json` — Serveurs MCP (Figma, GitHub)
 - `.cursor/hooks.json` — Hooks de supervision
 
@@ -158,7 +164,7 @@ Avec **`local_path`**, le texte long peut être lu depuis `project_context` / `c
 
 ## Chaîne assurance (rappel)
 
-Le `fullPipeline` ne couvre pas CI/CD, Docker ni la config d’observabilité produite par `devops` / `sre`. Avant merge sur le dépôt cible : revue humaine ciblée et/ou audit sécurité ciblé sur le diff infra, protections de branches, checklist workflows et conteneurs — voir [README.md](README.md) (section « Chaîne assurance »).
+L’exécution ticket (`pipeline next`) ne couvre pas CI/CD, Docker ni la config d’observabilité produite par `devops` / `sre`. Avant merge sur le dépôt cible : revue humaine ciblée et/ou audit sécurité ciblé sur le diff infra, protections de branches, checklist workflows et conteneurs — voir [README.md](README.md) (section « Chaîne assurance »).
 
 *Roadmap non implémentée : un `--pipeline extended` pourrait un jour enrichir le flux sans modifier le comportement par défaut du `full`.*
 
@@ -175,4 +181,4 @@ Le `fullPipeline` ne couvre pas CI/CD, Docker ni la config d’observabilité pr
 - Ne touche PAS à la logique des pipelines (PM → Architect → Red Team Réflexion → Dev ⇄ Sécurité ⇄ QA).
   Les feedback loops sont critiques pour la qualité.
 - Avec `--project`, les sorties sont écrites dans `last-run/<slug>/<role>.md` (un fichier par rôle ; deux runs parallèles sur le même rôle s’écrasent — usage prévu mono-session).
-- Les sorties **DevOps / SRE** (et tout diff CI/CD, Docker, observabilité) produites hors `fullPipeline` exigent une **révision assurance** humaine ou un passage sécurité ciblé avant merge sur le dépôt cible — section « Chaîne assurance » ci-dessus et détail dans le README.
+- Les sorties **DevOps / SRE** (et tout diff CI/CD, Docker, observabilité) produites hors `pipeline next` exigent une **révision assurance** humaine ou un passage sécurité ciblé avant merge sur le dépôt cible — section « Chaîne assurance » ci-dessus et détail dans le README.

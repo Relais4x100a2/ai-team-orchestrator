@@ -321,7 +321,7 @@ export function expectedPromptBasenames(): string[] {
   return [...set].sort();
 }
 
-/** Construit la config résolue pour chaque rôle (sans `issueSize` — équivalent invocations hors `fullPipeline` avec taille). */
+/** Construit la config résolue pour chaque rôle (sans `issueSize` — équivalent invocations agent hors `pipeline next` avec taille). */
 export function createAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
   const out = {} as Record<AgentRole, AgentRoleConfig>;
   for (const role of Object.keys(AGENT_DEFINITIONS) as AgentRole[]) {

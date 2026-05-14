@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { describe, it } from "node:test";
 import { join, resolve } from "path";
@@ -10,8 +10,10 @@ import {
   LAST_RUN_CONTEXT_FILE,
   resolveLastRunDir,
   saveLastRunContext,
+  clearLastRunPrUrl,
 } from "./run-context.js";
 import { LAST_RUN_BASE_DIR } from "./paths-and-env.js";
+import { emptyOrchestratorSession } from "./session.js";
 import type { OrchestratorSession } from "./session.js";
 
 describe("detectGitHubBranchUrl", () => {
@@ -47,12 +49,12 @@ describe("detectGitHubPrUrl", () => {
 
 describe("resolveLastRunDir", () => {
   it("retourne LAST_RUN_BASE_DIR/<slug> quand activeProjectSlug est défini", () => {
-    const session: OrchestratorSession = { activeProject: null, activeProjectSlug: "mon-projet" };
+    const session: OrchestratorSession = { ...emptyOrchestratorSession(), activeProject: null, activeProjectSlug: "mon-projet" };
     assert.equal(resolveLastRunDir(session), resolve(LAST_RUN_BASE_DIR, "mon-projet"));
   });
 
   it("retourne LAST_RUN_BASE_DIR quand activeProjectSlug est null", () => {
-    const session: OrchestratorSession = { activeProject: null, activeProjectSlug: null };
+    const session: OrchestratorSession = { ...emptyOrchestratorSession(), activeProject: null, activeProjectSlug: null };
     assert.equal(resolveLastRunDir(session), LAST_RUN_BASE_DIR);
   });
 
@@ -67,6 +69,7 @@ describe("resolveLastRunDir", () => {
       projectDataDir: dataDir,
     };
     const session: OrchestratorSession = {
+      ...emptyOrchestratorSession(),
       activeProject: project,
       activeProjectSlug: "slug",
     };
@@ -87,6 +90,7 @@ describe("saveLastRunContext", () => {
       "utf-8",
     );
     const session: OrchestratorSession = {
+      ...emptyOrchestratorSession(),
       activeProject: null,
       activeProjectSlug: "mon-projet",
     };
@@ -94,5 +98,35 @@ describe("saveLastRunContext", () => {
       () => saveLastRunContext(session, dir, "dev", "https://github.com/o/r/tree/feat\n"),
       /autre-projet/,
     );
+  });
+});
+
+describe("clearLastRunPrUrl", () => {
+  it("retire latestPrUrl sans toucher latestBranchUrl", () => {
+    const dir = resolve(LAST_RUN_BASE_DIR, "mon-projet");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, LAST_RUN_CONTEXT_FILE),
+      JSON.stringify({
+        updatedAt: new Date().toISOString(),
+        projectSlug: "mon-projet",
+        latestByRole: { dev: "dev.md" },
+        latestBranchUrl: "https://github.com/o/r/tree/backlog/01ABC-sprint",
+        latestPrUrl: "https://github.com/o/r/pull/99",
+      }),
+      "utf-8",
+    );
+    const session: OrchestratorSession = {
+      ...emptyOrchestratorSession(),
+      activeProject: null,
+      activeProjectSlug: "mon-projet",
+    };
+    clearLastRunPrUrl(session);
+    const raw = JSON.parse(readFileSync(join(dir, LAST_RUN_CONTEXT_FILE), "utf-8")) as {
+      latestPrUrl?: string;
+      latestBranchUrl?: string;
+    };
+    assert.equal(raw.latestPrUrl, undefined);
+    assert.equal(raw.latestBranchUrl, "https://github.com/o/r/tree/backlog/01ABC-sprint");
   });
 });

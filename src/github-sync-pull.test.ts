@@ -156,9 +156,10 @@ describe("fetchIssueComments", () => {
 
 function makeBacklog(overrides: Partial<Backlog> = {}): Backlog {
   return {
-    version: 1,
+    version: 2,
     lastUpdated: "2026-01-01T00:00:00Z",
     issues: [],
+    backlogDocumentId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
     ...overrides,
   };
 }
