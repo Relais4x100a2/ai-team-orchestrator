@@ -9,6 +9,10 @@ import { resolveLastRunDir } from "./run-context.js";
 import type { OrchestratorSession } from "./session.js";
 
 export function resolveBacklogPath(session: OrchestratorSession): string {
+  const dataDir = session.activeProject?.projectDataDir;
+  if (session.activeSprintId && dataDir) {
+    return resolve(dataDir, "sprints", session.activeSprintId, "backlog.json");
+  }
   if (session.activeProjectSlug) return resolve(resolveLastRunDir(session), "backlog.json");
   return BACKLOG_FALLBACK_PATH;
 }

@@ -34,6 +34,28 @@ describe("resolveBacklogPath", () => {
     const session: OrchestratorSession = { ...emptyOrchestratorSession(), activeProject: null, activeProjectSlug: null };
     assert.equal(resolveBacklogPath(session), BACKLOG_FALLBACK_PATH);
   });
+
+  it("renvoie sprints/<sprintId>/backlog.json quand activeSprintId est défini", () => {
+    const dataDir = "/tmp/foo/.ai-team-orchestrator";
+    const project: ProjectContext = {
+      name: "P",
+      repo: "https://github.com/a/b",
+      branch: "main",
+      content: "",
+      localPath: "/tmp/foo",
+      projectDataDir: dataDir,
+    };
+    const session: OrchestratorSession = {
+      ...emptyOrchestratorSession(),
+      activeProject: project,
+      activeProjectSlug: "slug",
+      activeSprintId: "01SPRINTTEST001ULID00000000",
+    };
+    assert.equal(
+      resolveBacklogPath(session),
+      resolve(dataDir, "sprints", "01SPRINTTEST001ULID00000000", "backlog.json"),
+    );
+  });
 });
 
 describe("loadBacklog migration backlogDocumentId", () => {
