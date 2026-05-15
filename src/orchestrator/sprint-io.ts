@@ -60,7 +60,7 @@ export function createSprint(
     direction,
     brief: truncatedBrief,
     issueCount: 0,
-    ...(parentSprintId ? { parentSprintId } : {}),
+    ...(parentSprintId !== undefined ? { parentSprintId } : {}),
   };
   saveSprintIndex(projectDataDir, {
     activeSprint: id,
