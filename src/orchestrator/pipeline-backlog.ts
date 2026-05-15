@@ -16,6 +16,7 @@ import { runAgent, resolveCloudMode } from "./agent-runner.js";
 import { migrateLegacySecurityFile, resolveLastRunDir } from "./run-context.js";
 import type { OrchestratorSession } from "./session.js";
 import { extractOpenQuestions, promptOpenQuestions } from "./open-questions.js";
+import { buildCodeSnapshot } from "./code-snapshot.js";
 
 /** Sauvegarde la sortie PM quand parsePMOutput ne peut pas être appliqué (diagnostic hors backlog.json). */
 function savePmParseFailureArtifacts(
@@ -144,12 +145,20 @@ export async function pipelineBacklogReflection(
   console.log(`   Source attendue : ${label}`);
 
   const frugal = await checkFrugalMode(process.env);
+
+  const codeSnapshot = session.activeProject?.localPath
+    ? buildCodeSnapshot(session.activeProject.localPath, session.activeProject.projectDataDir ?? undefined)
+    : "";
+
+  const withSnapshot = (ctx: string): string =>
+    codeSnapshot ? `## Contexte code du projet\n\n${codeSnapshot}\n\n---\n\n${ctx}` : ctx;
+
   const pmTask =
     direction === "forward"
       ? "À partir de cette métavision, génère/structure des user stories backlog actionnables avec priorités, tailles et critères d'acceptation."
       : "À partir de ce feedback terrain, révise et complète le backlog en ajustant priorités, tailles et critères d'acceptation.";
   const specs = await runAgent(session, "pm", pmTask, {
-    additionalContext: brief,
+    additionalContext: withSnapshot(brief),
     frugal,
     cloud: resolveCloudMode(session, "pm"),
   });
@@ -157,7 +166,7 @@ export async function pipelineBacklogReflection(
   const pmAnswers = await collectOpenAnswers(specs);
   const specsWithAnswers = pmAnswers ? `${pmAnswers}\n\n---\n\n${specs}` : specs;
 
-  const architecture = await runArchitectForBacklogReflection(session, specsWithAnswers, frugal);
+  const architecture = await runArchitectForBacklogReflection(session, withSnapshot(specsWithAnswers), frugal);
 
   const archAnswers = await collectOpenAnswers(architecture);
   const architectureWithAnswers = archAnswers ? `${archAnswers}\n\n---\n\n${architecture}` : architecture;
@@ -167,7 +176,7 @@ export async function pipelineBacklogReflection(
     "redteam_reflection",
     "Challenge la cohérence produit/architecture et propose les ajustements backlog nécessaires.",
     {
-      additionalContext: `## Backlog\n${specsWithAnswers}\n\n## Vision architecture\n${architectureWithAnswers}`,
+      additionalContext: withSnapshot(`## Backlog\n${specsWithAnswers}\n\n## Vision architecture\n${architectureWithAnswers}`),
       frugal,
       cloud: resolveCloudMode(session, "redteam_reflection"),
     },
@@ -179,7 +188,7 @@ export async function pipelineBacklogReflection(
   const pmSynthesisTask =
     "À partir de la vision PM initiale, des contraintes architecture et des défis red team, produis la version FINALE et révisée du backlog. Intègre les ajustements de priorité, taille et description proposés. Utilise EXACTEMENT le même format (## 🎯 User Story, ## 🏷️ Priorité, ## 📏 Taille estimée, etc.) séparé par ---.";
   const specsFinal = await runAgent(session, "pm", pmSynthesisTask, {
-    additionalContext: `## Backlog initial (PM)\n${specsWithAnswers}\n\n## Vision architecture\n${architectureWithAnswers}\n\n## Défis et ajustements Red Team\n${reflectionWithAnswers}`,
+    additionalContext: withSnapshot(`## Backlog initial (PM)\n${specsWithAnswers}\n\n## Vision architecture\n${architectureWithAnswers}\n\n## Défis et ajustements Red Team\n${reflectionWithAnswers}`),
     frugal,
     cloud: resolveCloudMode(session, "pm"),
   });
