@@ -74,4 +74,18 @@ describe("--sprint option parsing", () => {
     assert.equal(result.status, 1);
     assert.match(`${result.stdout}\n${result.stderr}`, /--sprint nécessite un ULID/);
   });
+
+  it("rejette --sprint avec un format non-ULID via le binaire CLI", () => {
+    const entry = resolve(process.cwd(), "src/orchestrator.ts");
+    const result = spawnSync(
+      process.execPath,
+      ["--import", "tsx", entry, "--sprint", "not-a-valid-ulid"],
+      {
+        env: { ...process.env, CURSOR_API_KEY: process.env.CURSOR_API_KEY ?? "test-cli-key" },
+        encoding: "utf8",
+      },
+    );
+    assert.equal(result.status, 1);
+    assert.match(`${result.stdout}\n${result.stderr}`, /format ULID invalide/);
+  });
 });

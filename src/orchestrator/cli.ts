@@ -84,6 +84,17 @@ export async function main(): Promise<void> {
       console.error("❌ --sprint nécessite un ULID de sprint (26 caractères).");
       process.exit(1);
     }
+    if (!isValidBacklogDocumentId(sprintId)) {
+      console.error("❌ --sprint : format ULID invalide (Crockford base32, 26 caractères).");
+      process.exit(1);
+    }
+    if (session.activeProject?.projectDataDir) {
+      const idx = loadSprintIndex(session.activeProject.projectDataDir);
+      if (!idx?.sprints.find((s) => s.id === sprintId)) {
+        console.error(`❌ --sprint : sprint « ${sprintId} » introuvable dans sprints/index.json.`);
+        process.exit(1);
+      }
+    }
     session.activeSprintId = sprintId;
   }
 
