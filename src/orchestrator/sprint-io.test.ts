@@ -37,6 +37,25 @@ describe("createSprint", () => {
     assert.ok(index!.sprints.some(s => s.id === id2));
     rmSync(tmp, { recursive: true, force: true });
   });
+
+  it("persiste parentSprintId dans index.json quand fourni", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sprint-"));
+    const parentId = createSprint(tmp, "forward", "Sprint parent");
+    const childId = createSprint(tmp, "backward", "Sprint enfant", parentId);
+    const index = loadSprintIndex(tmp);
+    const child = index!.sprints.find((s) => s.id === childId);
+    assert.equal(child!.parentSprintId, parentId);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("laisse parentSprintId absent si non fourni", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sprint-"));
+    const id = createSprint(tmp, "forward", "Sprint sans parent");
+    const index = loadSprintIndex(tmp);
+    const entry = index!.sprints.find((s) => s.id === id);
+    assert.equal(entry!.parentSprintId, undefined);
+    rmSync(tmp, { recursive: true, force: true });
+  });
 });
 
 describe("loadSprintIndex", () => {

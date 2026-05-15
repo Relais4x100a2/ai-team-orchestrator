@@ -9,6 +9,7 @@ export type SprintEntry = {
   direction: "forward" | "backward";
   brief: string;
   issueCount: number;
+  parentSprintId?: string;
 };
 
 export type SprintIndex = {
@@ -44,6 +45,7 @@ export function createSprint(
   projectDataDir: string,
   direction: "forward" | "backward",
   brief: string,
+  parentSprintId?: string,
 ): string {
   const id = ulid();
   mkdirSync(resolve(resolveSprintsDir(projectDataDir), id), { recursive: true });
@@ -58,6 +60,7 @@ export function createSprint(
     direction,
     brief: truncatedBrief,
     issueCount: 0,
+    ...(parentSprintId ? { parentSprintId } : {}),
   };
   saveSprintIndex(projectDataDir, {
     activeSprint: id,
