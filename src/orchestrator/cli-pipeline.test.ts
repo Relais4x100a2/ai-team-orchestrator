@@ -59,3 +59,19 @@ describe("CLI pipeline (processus)", () => {
     assert.match(`${result.stdout}\n${result.stderr}`, /--pipeline attend 'next' ou 'backlog forward\|backward'/);
   });
 });
+
+describe("--sprint option parsing", () => {
+  it("rejette --sprint sans valeur via le binaire CLI", () => {
+    const entry = resolve(process.cwd(), "src/orchestrator.ts");
+    const result = spawnSync(
+      process.execPath,
+      ["--import", "tsx", entry, "--sprint"],
+      {
+        env: { ...process.env, CURSOR_API_KEY: process.env.CURSOR_API_KEY ?? "test-cli-key" },
+        encoding: "utf8",
+      },
+    );
+    assert.equal(result.status, 1);
+    assert.match(`${result.stdout}\n${result.stderr}`, /--sprint nécessite un ULID/);
+  });
+});

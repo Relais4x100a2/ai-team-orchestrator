@@ -3,6 +3,7 @@ import { resolve } from "path";
 import type { IssueSize } from "../backlog.js";
 import { generateIssueId, parsePMOutput } from "../backlog.js";
 import { checkFrugalMode } from "../spend-guard.js";
+import { createSprint, loadSprintIndex, updateSprintIssueCount } from "./sprint-io.js";
 import {
   extractHandoffSection,
   formatDataDirPath,
@@ -144,6 +145,14 @@ export async function pipelineBacklogReflection(
   console.log("═".repeat(60));
   console.log(`   Source attendue : ${label}`);
 
+  // Créer un sprint si projectDataDir est disponible
+  if (session.activeProject?.projectDataDir) {
+    const sprintId = createSprint(session.activeProject.projectDataDir, direction, brief);
+    session.activeSprintId = sprintId;
+    session.agentOutputRelativeSubdir = `sprints/${sprintId}`;
+    console.log(`   📁 Sprint : ${sprintId}`);
+  }
+
   const frugal = await checkFrugalMode(process.env);
 
   const codeSnapshot = session.activeProject?.localPath
@@ -245,6 +254,9 @@ export async function pipelineBacklogReflection(
   }
 
   saveBacklog(session, backlog);
+  if (session.activeProject?.projectDataDir && session.activeSprintId) {
+    updateSprintIssueCount(session.activeProject.projectDataDir, session.activeSprintId, parsedIssues.length);
+  }
   console.log(`\n✅ Backlog mis à jour via pipeline backlog ${direction} (${parsedIssues.length} item(s) traités).`);
   printBacklogSummary(session, backlog);
 }

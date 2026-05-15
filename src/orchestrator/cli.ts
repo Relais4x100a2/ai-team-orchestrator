@@ -11,6 +11,7 @@ import { loadProject, warnIfLegacyLastRunDataExists } from "./project-loader.js"
 import { resolveUserPath } from "./paths-and-env.js";
 import { emptyOrchestratorSession } from "./session.js";
 import { pipelineNext, pipelineBacklogReflection, pmBacklogWorkflow } from "./workflows.js";
+import { loadSprintIndex, migrateLegacyBacklogToSprint } from "./sprint-io.js";
 
 const PIPELINE_NEXT_RESUME_STEPS: PipelineStep[] = ["architect", "dev", "security", "qa"];
 
@@ -57,6 +58,11 @@ export async function main(): Promise<void> {
     warnIfLegacyLastRunDataExists(session.activeProjectSlug, session.activeProject.projectDataDir);
   }
 
+  // Migration automatique backlog.json → sprints/ si nécessaire
+  if (session.activeProject?.projectDataDir) {
+    migrateLegacyBacklogToSprint(session.activeProject.projectDataDir);
+  }
+
   const backlogIdFlag = args.indexOf("--backlog-id");
   if (backlogIdFlag !== -1) {
     const rawId = args[backlogIdFlag + 1]?.trim();
@@ -69,6 +75,16 @@ export async function main(): Promise<void> {
       process.exit(1);
     }
     session.cliBacklogDocumentId = rawId;
+  }
+
+  const sprintFlag = args.indexOf("--sprint");
+  if (sprintFlag !== -1) {
+    const sprintId = args[sprintFlag + 1]?.trim();
+    if (!sprintId || sprintId.startsWith("--")) {
+      console.error("❌ --sprint nécessite un ULID de sprint (26 caractères).");
+      process.exit(1);
+    }
+    session.activeSprintId = sprintId;
   }
 
   let briefFromFile: string | null = null;
@@ -138,6 +154,13 @@ export async function main(): Promise<void> {
         console.error(`   Étapes valides : ${PIPELINE_NEXT_RESUME_STEPS.join(", ")}`);
         process.exit(1);
       }
+      // Charger le sprint actif si --sprint non passé explicitement
+      if (!session.activeSprintId && session.activeProject?.projectDataDir) {
+        const index = loadSprintIndex(session.activeProject.projectDataDir);
+        if (index?.activeSprint) {
+          session.activeSprintId = index.activeSprint;
+        }
+      }
       await pipelineNext(session, pipelineNextCliOptions(resumeFrom));
     } else if (subcommand === "backlog") {
       const direction = args[pipelineFlag + 2];
@@ -197,6 +220,24 @@ export async function main(): Promise<void> {
   } else if (pmBacklogFlag !== -1) {
     await pmBacklogWorkflow(session);
   } else if (backlogFlag !== -1) {
+    const dataDir = session.activeProject?.projectDataDir;
+    if (dataDir) {
+      const index = loadSprintIndex(dataDir);
+      if (index && index.sprints.length > 0) {
+        console.log("\n" + "═".repeat(60));
+        console.log("🗂️  SPRINTS");
+        console.log("═".repeat(60));
+        for (const s of [...index.sprints].reverse()) {
+          const active = s.id === index.activeSprint ? " ← actif" : "";
+          const date = new Date(s.createdAt).toLocaleString("fr-FR");
+          console.log(`  ${s.id}${active}`);
+          console.log(`    ${date} [${s.direction}] ${s.issueCount} issue(s) — ${s.brief}`);
+        }
+        console.log("═".repeat(60));
+        // Charger le backlog du sprint actif
+        session.activeSprintId = index.activeSprint;
+      }
+    }
     printBacklogSummary(session);
   } else {
     console.log(`
