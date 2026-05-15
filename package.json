@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "test": "tsx --test src/pipeline-detection.test.ts src/backlog.test.ts src/agent-config.test.ts src/github-sync-close.test.ts src/github-sync-pull.test.ts src/github-sync-issue-body.test.ts src/github-pr-pipeline.test.ts src/spend-guard.test.ts src/cloud-policy.test.ts src/project-branch-url.test.ts tests/models.test.ts src/orchestrator/run-context.test.ts src/orchestrator/backlog-io.test.ts src/orchestrator/backlog-work-branch.test.ts src/orchestrator/runs-cleanup.test.ts src/orchestrator/branch-guard.test.ts src/orchestrator/context-builders.test.ts src/orchestrator/project-loader.test.ts src/orchestrator/paths-and-env.test.ts src/orchestrator/pipeline-pr-resolve.test.ts src/orchestrator/pipeline-dev-guards.test.ts src/orchestrator/pipeline-next-closure.test.ts src/orchestrator/cli-pipeline.test.ts src/project-init-yaml.test.ts",
+    "test": "tsx --test src/pipeline-detection.test.ts src/backlog.test.ts src/agent-config.test.ts src/github-sync-close.test.ts src/github-sync-pull.test.ts src/github-sync-issue-body.test.ts src/github-pr-pipeline.test.ts src/spend-guard.test.ts src/cloud-policy.test.ts src/project-branch-url.test.ts tests/models.test.ts src/orchestrator/run-context.test.ts src/orchestrator/backlog-io.test.ts src/orchestrator/backlog-work-branch.test.ts src/orchestrator/runs-cleanup.test.ts src/orchestrator/branch-guard.test.ts src/orchestrator/context-builders.test.ts src/orchestrator/project-loader.test.ts src/orchestrator/paths-and-env.test.ts src/orchestrator/pipeline-pr-resolve.test.ts src/orchestrator/pipeline-dev-guards.test.ts src/orchestrator/pipeline-next-closure.test.ts src/orchestrator/cli-pipeline.test.ts src/orchestrator/open-questions.test.ts src/project-init-yaml.test.ts src/context-scaffold-scan.test.ts",
     "start": "tsx src/orchestrator.ts",
     "dev": "tsx watch src/orchestrator.ts",
     "agent:pm": "tsx src/orchestrator.ts --role pm",
@@ -28,6 +28,7 @@
     "backlog": "tsx src/orchestrator.ts --backlog",
     "verify:prompts": "tsx src/verify-prompts.ts",
     "migrate:project-context": "tsx scripts/migrate-project-bodies-to-context.ts",
+    "context:scan": "tsx scripts/context-scan.ts",
     "project:init": "tsx scripts/init-project-from-yaml.ts",
     "test:coverage": "c8 --reporter=text-summary --reporter=json-summary npm test",
     "coverage:gate": "node scripts/check-coverage-gate.mjs",
