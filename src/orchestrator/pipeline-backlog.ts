@@ -15,6 +15,7 @@ import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
 import { runAgent, resolveCloudMode } from "./agent-runner.js";
 import { migrateLegacySecurityFile, resolveLastRunDir } from "./run-context.js";
 import type { OrchestratorSession } from "./session.js";
+import { extractOpenQuestions, promptOpenQuestions } from "./open-questions.js";
 
 /** Sauvegarde la sortie PM quand parsePMOutput ne peut pas être appliqué (diagnostic hors backlog.json). */
 function savePmParseFailureArtifacts(
@@ -108,6 +109,22 @@ export async function pmBacklogWorkflow(session: OrchestratorSession): Promise<v
   printBacklogSummary(session, backlog);
 }
 
+/**
+ * Si la sortie contient des questions ouvertes et que stdin est interactif,
+ * pause et collecte les réponses. Retourne une chaîne à préfixer dans additionalContext.
+ */
+async function collectOpenAnswers(agentOutput: string): Promise<string> {
+  const questions = extractOpenQuestions(agentOutput);
+  if (questions.length === 0 || !process.stdin.isTTY) {
+    if (questions.length > 0) {
+      console.warn(`\n⚠️  ${questions.length} question(s) ouverte(s) détectée(s) — mode non-interactif, ignorée(s).`);
+    }
+    return "";
+  }
+  console.log(`\n💬 ${questions.length} question(s) ouverte(s) de l'agent — répondre pour affiner l'étape suivante.`);
+  return promptOpenQuestions(questions);
+}
+
 export async function pipelineBacklogReflection(
   session: OrchestratorSession,
   direction: "forward" | "backward",
@@ -131,23 +148,32 @@ export async function pipelineBacklogReflection(
     cloud: resolveCloudMode(session, "pm"),
   });
 
-  const architecture = await runArchitectForBacklogReflection(session, specs, frugal);
+  const pmAnswers = await collectOpenAnswers(specs);
+  const specsWithAnswers = pmAnswers ? `${pmAnswers}\n\n---\n\n${specs}` : specs;
+
+  const architecture = await runArchitectForBacklogReflection(session, specsWithAnswers, frugal);
+
+  const archAnswers = await collectOpenAnswers(architecture);
+  const architectureWithAnswers = archAnswers ? `${archAnswers}\n\n---\n\n${architecture}` : architecture;
 
   const reflection = await runAgent(
     session,
     "redteam_reflection",
     "Challenge la cohérence produit/architecture et propose les ajustements backlog nécessaires.",
     {
-      additionalContext: `## Backlog\n${specs}\n\n## Vision architecture\n${architecture}`,
+      additionalContext: `## Backlog\n${specsWithAnswers}\n\n## Vision architecture\n${architectureWithAnswers}`,
       frugal,
       cloud: resolveCloudMode(session, "redteam_reflection"),
     },
   );
 
+  const reflectionAnswers = await collectOpenAnswers(reflection);
+  const reflectionWithAnswers = reflectionAnswers ? `${reflectionAnswers}\n\n---\n\n${reflection}` : reflection;
+
   const pmSynthesisTask =
     "À partir de la vision PM initiale, des contraintes architecture et des défis red team, produis la version FINALE et révisée du backlog. Intègre les ajustements de priorité, taille et description proposés. Utilise EXACTEMENT le même format (## 🎯 User Story, ## 🏷️ Priorité, ## 📏 Taille estimée, etc.) séparé par ---.";
   const specsFinal = await runAgent(session, "pm", pmSynthesisTask, {
-    additionalContext: `## Backlog initial (PM)\n${specs}\n\n## Vision architecture\n${architecture}\n\n## Défis et ajustements Red Team\n${reflection}`,
+    additionalContext: `## Backlog initial (PM)\n${specsWithAnswers}\n\n## Vision architecture\n${architectureWithAnswers}\n\n## Défis et ajustements Red Team\n${reflectionWithAnswers}`,
     frugal,
     cloud: resolveCloudMode(session, "pm"),
   });
