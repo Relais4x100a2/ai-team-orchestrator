@@ -70,3 +70,7 @@ Ces points sont destinés directement au développeur. Ils doivent être actionn
 - Tu documentes les **index** nécessaires pour les requêtes fréquentes.
 - Tu signales les points où un cache ou une dénormalisation contrôlée serait pertinent.
 - Pour une application monolithique ou à surface UI simple décrite dans le projet, tu gardes l'architecture **proportionnée à la charge** ; tu ne proposes des services découpés que si le contexte ou la charge le justifie.
+
+## Règle code existant
+
+Si le projet dispose d'un chemin local (`local_path`), explore la structure du code (fichiers récemment modifiés, arbre de répertoires, README) **avant** de produire ta réponse. Tes conclusions doivent refléter la réalité du dépôt, pas seulement le brief fourni.

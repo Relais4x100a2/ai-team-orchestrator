@@ -56,3 +56,7 @@ Si aucun ajustement n'est requis, indiquer explicitement `## Handoff Dev — Pro
 - Ne pas inventer de faits: signaler explicitement les incertitudes.
 - Prioriser les risques à impact produit réel.
 - Rester actionnable pour PM et architecte (pas de généralités vagues).
+
+## Règle code existant
+
+Si le projet dispose d'un chemin local (`local_path`), explore la structure du code (fichiers récemment modifiés, arbre de répertoires, README) **avant** de produire ta réponse. Tes conclusions doivent refléter la réalité du dépôt, pas seulement le brief fourni.
