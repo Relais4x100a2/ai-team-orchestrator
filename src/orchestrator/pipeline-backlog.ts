@@ -1,6 +1,6 @@
-import { writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import type { IssueSize } from "../backlog.js";
+import type { Backlog, IssueSize } from "../backlog.js";
 import { generateIssueId, parsePMOutput } from "../backlog.js";
 import { checkFrugalMode } from "../spend-guard.js";
 import { createSprint, loadSprintIndex, updateSprintIssueCount } from "./sprint-io.js";
@@ -12,7 +12,7 @@ import {
   REPO_ROOT,
   warnIfHandoffFallback,
 } from "./paths-and-env.js";
-import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
+import { formatBacklogForContext, loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
 import { runAgent, resolveCloudMode } from "./agent-runner.js";
 import { migrateLegacySecurityFile, resolveLastRunDir } from "./run-context.js";
 import type { OrchestratorSession } from "./session.js";
@@ -137,6 +137,7 @@ export async function pipelineBacklogReflection(
   session: OrchestratorSession,
   direction: "forward" | "backward",
   brief: string,
+  fromSprintId?: string,
 ): Promise<void> {
   const source = direction === "forward" ? "top_down" : "bottom_up";
   const label = direction === "forward" ? "métavision (top-down)" : "feedback (bottom-up)";
@@ -145,9 +146,30 @@ export async function pipelineBacklogReflection(
   console.log("═".repeat(60));
   console.log(`   Source attendue : ${label}`);
 
+  let backlogContext = "";
+  if (fromSprintId && session.activeProject?.projectDataDir) {
+    const sourcePath = resolve(
+      session.activeProject.projectDataDir,
+      "sprints",
+      fromSprintId,
+      "backlog.json",
+    );
+    if (existsSync(sourcePath)) {
+      try {
+        const sourceBacklog = JSON.parse(readFileSync(sourcePath, "utf-8")) as Backlog;
+        backlogContext = formatBacklogForContext(sourceBacklog);
+        console.log(`   🔗 Continuité depuis sprint : ${fromSprintId}`);
+      } catch {
+        console.warn(`   ⚠️  Sprint source : lecture échouée — démarrage sans contexte.`);
+      }
+    } else {
+      console.warn(`   ⚠️  Sprint source introuvable : ${fromSprintId} — démarrage sans contexte.`);
+    }
+  }
+
   // Créer un sprint si projectDataDir est disponible
   if (session.activeProject?.projectDataDir) {
-    const sprintId = createSprint(session.activeProject.projectDataDir, direction, brief);
+    const sprintId = createSprint(session.activeProject.projectDataDir, direction, brief, fromSprintId);
     session.activeSprintId = sprintId;
     session.agentOutputRelativeSubdir = `sprints/${sprintId}`;
     console.log(`   📁 Sprint : ${sprintId}`);
@@ -159,8 +181,13 @@ export async function pipelineBacklogReflection(
     ? buildCodeSnapshot(session.activeProject.localPath, session.activeProject.projectDataDir ?? undefined)
     : "";
 
-  const withSnapshot = (ctx: string): string =>
-    codeSnapshot ? `## Contexte code du projet\n\n${codeSnapshot}\n\n---\n\n${ctx}` : ctx;
+  const withSnapshot = (ctx: string): string => {
+    const parts: string[] = [];
+    if (backlogContext) parts.push(backlogContext);
+    if (codeSnapshot) parts.push(`## Contexte code du projet\n\n${codeSnapshot}`);
+    parts.push(ctx);
+    return parts.join("\n\n---\n\n");
+  };
 
   const pmTask =
     direction === "forward"
