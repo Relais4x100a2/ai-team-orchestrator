@@ -181,9 +181,9 @@ export async function pipelineBacklogReflection(
     ? buildCodeSnapshot(session.activeProject.localPath, session.activeProject.projectDataDir ?? undefined)
     : "";
 
-  const withSnapshot = (ctx: string): string => {
+  const withSnapshot = (ctx: string, includeCarryover = false): string => {
     const parts: string[] = [];
-    if (backlogContext) parts.push(backlogContext);
+    if (includeCarryover && backlogContext) parts.push(backlogContext);
     if (codeSnapshot) parts.push(`## Contexte code du projet\n\n${codeSnapshot}`);
     parts.push(ctx);
     return parts.join("\n\n---\n\n");
@@ -194,7 +194,7 @@ export async function pipelineBacklogReflection(
       ? "À partir de cette métavision, génère/structure des user stories backlog actionnables avec priorités, tailles et critères d'acceptation."
       : "À partir de ce feedback terrain, révise et complète le backlog en ajustant priorités, tailles et critères d'acceptation.";
   const specs = await runAgent(session, "pm", pmTask, {
-    additionalContext: withSnapshot(brief),
+    additionalContext: withSnapshot(brief, true),
     frugal,
     cloud: resolveCloudMode(session, "pm"),
   });

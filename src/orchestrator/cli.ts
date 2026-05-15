@@ -116,6 +116,8 @@ export async function main(): Promise<void> {
         console.error(`❌ --from-sprint : sprint « ${val} » introuvable dans sprints/index.json.`);
         process.exit(1);
       }
+    } else {
+      console.warn("⚠️  --from-sprint : pas de projectDataDir — existence du sprint non vérifiée.");
     }
     cliFromSprintId = val;
   }
