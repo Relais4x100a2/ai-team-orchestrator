@@ -147,7 +147,7 @@ export async function pipelineBacklogReflection(
   console.log(`   Source attendue : ${label}`);
 
   let backlogContext = "";
-  if (fromSprintId && session.activeProject?.projectDataDir) {
+  if (fromSprintId !== undefined && session.activeProject?.projectDataDir) {
     const sourcePath = resolve(
       session.activeProject.projectDataDir,
       "sprints",
@@ -159,8 +159,8 @@ export async function pipelineBacklogReflection(
         const sourceBacklog = JSON.parse(readFileSync(sourcePath, "utf-8")) as Backlog;
         backlogContext = formatBacklogForContext(sourceBacklog);
         console.log(`   🔗 Continuité depuis sprint : ${fromSprintId}`);
-      } catch {
-        console.warn(`   ⚠️  Sprint source : lecture échouée — démarrage sans contexte.`);
+      } catch (e) {
+        console.warn(`   ⚠️  Sprint source : lecture échouée — démarrage sans contexte. (${(e as Error).message})`);
       }
     } else {
       console.warn(`   ⚠️  Sprint source introuvable : ${fromSprintId} — démarrage sans contexte.`);
