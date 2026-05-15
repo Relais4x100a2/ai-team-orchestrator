@@ -13,6 +13,8 @@ export type OrchestratorSession = {
   agentOutputRelativeSubdir: string | null;
   /** Branche Git locale + `startingRef` cloud pour l’exécution ticket (`backlog/...`). */
   backlogWorkBranch: string | null;
+  /** Sprint actif — route les lectures/écritures du backlog vers `sprints/<id>/backlog.json`. */
+  activeSprintId: string | null;
 };
 
 export function emptyOrchestratorSession(): OrchestratorSession {
@@ -22,5 +24,6 @@ export function emptyOrchestratorSession(): OrchestratorSession {
     cliBacklogDocumentId: null,
     agentOutputRelativeSubdir: null,
     backlogWorkBranch: null,
+    activeSprintId: null,
   };
 }
