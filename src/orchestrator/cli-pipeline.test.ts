@@ -89,3 +89,33 @@ describe("--sprint option parsing", () => {
     assert.match(`${result.stdout}\n${result.stderr}`, /format ULID invalide/);
   });
 });
+
+describe("--from-sprint option parsing", () => {
+  it("rejette --from-sprint sans valeur via le binaire CLI", () => {
+    const entry = resolve(process.cwd(), "src/orchestrator.ts");
+    const result = spawnSync(
+      process.execPath,
+      ["--import", "tsx", entry, "--from-sprint"],
+      {
+        env: { ...process.env, CURSOR_API_KEY: process.env.CURSOR_API_KEY ?? "test-cli-key" },
+        encoding: "utf8",
+      },
+    );
+    assert.equal(result.status, 1);
+    assert.match(`${result.stdout}\n${result.stderr}`, /--from-sprint nécessite un ULID/);
+  });
+
+  it("rejette --from-sprint avec un format non-ULID via le binaire CLI", () => {
+    const entry = resolve(process.cwd(), "src/orchestrator.ts");
+    const result = spawnSync(
+      process.execPath,
+      ["--import", "tsx", entry, "--from-sprint", "pas-un-ulid"],
+      {
+        env: { ...process.env, CURSOR_API_KEY: process.env.CURSOR_API_KEY ?? "test-cli-key" },
+        encoding: "utf8",
+      },
+    );
+    assert.equal(result.status, 1);
+    assert.match(`${result.stdout}\n${result.stderr}`, /format ULID invalide/);
+  });
+});

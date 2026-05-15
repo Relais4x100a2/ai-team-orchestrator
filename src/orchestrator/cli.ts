@@ -98,6 +98,28 @@ export async function main(): Promise<void> {
     session.activeSprintId = sprintId;
   }
 
+  const fromSprintFlag = args.indexOf("--from-sprint");
+  let cliFromSprintId: string | undefined;
+  if (fromSprintFlag !== -1) {
+    const val = args[fromSprintFlag + 1]?.trim();
+    if (!val || val.startsWith("--")) {
+      console.error("❌ --from-sprint nécessite un ULID de sprint (26 caractères).");
+      process.exit(1);
+    }
+    if (!isValidBacklogDocumentId(val)) {
+      console.error("❌ --from-sprint : format ULID invalide (Crockford base32, 26 caractères).");
+      process.exit(1);
+    }
+    if (session.activeProject?.projectDataDir) {
+      const idx = loadSprintIndex(session.activeProject.projectDataDir);
+      if (!idx?.sprints.find((s) => s.id === val)) {
+        console.error(`❌ --from-sprint : sprint « ${val} » introuvable dans sprints/index.json.`);
+        process.exit(1);
+      }
+    }
+    cliFromSprintId = val;
+  }
+
   let briefFromFile: string | null = null;
   const briefFileFlag = args.indexOf("--brief-file");
   if (briefFileFlag !== -1 && args[briefFileFlag + 1]) {
@@ -181,7 +203,15 @@ export async function main(): Promise<void> {
       }
       const briefFromCli = args.slice(pipelineFlag + 3).join(" ");
       const brief = briefFromFile ?? (briefFromCli || "Structurer ou réviser le backlog selon le contexte fourni.");
-      await pipelineBacklogReflection(session, direction, brief);
+      // Résoudre le sprint source : --from-sprint explicite, sinon sprint actif
+      let fromSprintId = cliFromSprintId;
+      if (fromSprintId === undefined && session.activeProject?.projectDataDir) {
+        const index = loadSprintIndex(session.activeProject.projectDataDir);
+        if (index?.activeSprint) {
+          fromSprintId = index.activeSprint;
+        }
+      }
+      await pipelineBacklogReflection(session, direction, brief, fromSprintId);
     } else {
       const subcommandError = getPipelineSubcommandError(subcommand);
       console.error(subcommandError ?? "❌ --pipeline attend 'next' ou 'backlog forward|backward'.");
@@ -243,6 +273,9 @@ export async function main(): Promise<void> {
           const date = new Date(s.createdAt).toLocaleString();
           console.log(`  ${s.id}${active}`);
           console.log(`    ${date} [${s.direction}] ${s.issueCount} issue(s) — ${s.brief}`);
+          if (s.parentSprintId) {
+            console.log(`    └─ parent : ${s.parentSprintId}`);
+          }
         }
         console.log("═".repeat(60));
         // Charger le backlog du sprint actif
