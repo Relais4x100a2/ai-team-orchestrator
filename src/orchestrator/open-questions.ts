@@ -1,10 +1,12 @@
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 
+/** Préfixe utilisé pour formater une réponse dans la sortie de `promptOpenQuestions`. */
+export const ANSWER_PREFIX = "   → ";
+
 /**
  * Extrait les questions ouvertes d'une sortie agent.
- * Cherche en priorité les sections "### Question ouverte".
- * Fallback : paragraphes de fin se terminant par "?".
+ * Détecte uniquement les sections explicites "### Question(s) ouverte(s)".
  */
 export function extractOpenQuestions(text: string): string[] {
   const lines = text.split("\n");
@@ -38,15 +40,7 @@ export function extractOpenQuestions(text: string): string[] {
     if (q) questions.push(q);
   }
 
-  if (questions.length > 0) return questions;
-
-  // Fallback : paragraphes de fin (derniers 1500 chars) se terminant par "?"
-  const tail = text.slice(-1500);
-  return tail
-    .split(/\n\n+/)
-    .filter((p) => p.trim().endsWith("?"))
-    .map((p) => p.trim())
-    .filter(Boolean);
+  return questions;
 }
 
 /** Version injectable pour les tests — prend des streams en paramètre. */
@@ -65,7 +59,7 @@ export async function promptOpenQuestionsWithStreams(
     const q = questions[i];
     const answer = await askLine(`\n❓ Question ${i + 1}/${questions.length} :\n${q}\n\n→ Ta réponse : `);
     lines.push(`${i + 1}. ${q}`);
-    lines.push(`   → ${answer.trim()}`);
+    lines.push(`${ANSWER_PREFIX}${answer.trim()}`);
     lines.push("");
   }
 

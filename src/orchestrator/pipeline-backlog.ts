@@ -16,7 +16,7 @@ import { loadBacklog, saveBacklog, printBacklogSummary } from "./backlog-io.js";
 import { runAgent, resolveCloudMode } from "./agent-runner.js";
 import { migrateLegacySecurityFile, resolveLastRunDir } from "./run-context.js";
 import type { OrchestratorSession } from "./session.js";
-import { extractOpenQuestions, promptOpenQuestions } from "./open-questions.js";
+import { ANSWER_PREFIX, extractOpenQuestions, promptOpenQuestions } from "./open-questions.js";
 import { buildCodeSnapshot } from "./code-snapshot.js";
 
 /** Sauvegarde la sortie PM quand parsePMOutput ne peut pas être appliqué (diagnostic hors backlog.json). */
@@ -128,8 +128,8 @@ async function collectOpenAnswers(agentOutput: string): Promise<string> {
   // Discard if user provided only empty answers
   const hasContent = collected
     .split("\n")
-    .filter((l) => l.startsWith("   → "))
-    .some((l) => l.replace("   → ", "").trim().length > 0);
+    .filter((l) => l.startsWith(ANSWER_PREFIX))
+    .some((l) => l.replace(ANSWER_PREFIX, "").trim().length > 0);
   return hasContent ? collected : "";
 }
 

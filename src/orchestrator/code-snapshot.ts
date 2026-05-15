@@ -1,5 +1,5 @@
 import { execFileSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, statSync } from "fs";
 import { resolve } from "path";
 
 const SNAPSHOT_MAX_CHARS = 2000;
@@ -7,6 +7,18 @@ const SNAPSHOT_MAX_CHARS = 2000;
 function trimSnapshot(text: string): string {
   if (text.length <= SNAPSHOT_MAX_CHARS) return text;
   return text.slice(0, SNAPSHOT_MAX_CHARS) + "\n\n[…tronqué]";
+}
+
+/** Retourne true si context.md est plus vieux que le dernier commit git dans localPath. */
+function isContextStale(contextPath: string, localPath: string): boolean {
+  try {
+    const contextMtime = statSync(contextPath).mtimeMs;
+    const lastCommitTs = tryExec("git", ["log", "-1", "--format=%ct"], localPath);
+    if (!lastCommitTs) return false;
+    return parseInt(lastCommitTs, 10) * 1000 > contextMtime;
+  } catch {
+    return false;
+  }
 }
 
 function tryExec(cmd: string, args: string[], cwd: string): string {
@@ -27,7 +39,11 @@ export function buildCodeSnapshot(localPath: string, projectDataDir?: string): s
     if (existsSync(contextPath)) {
       const content = readFileSync(contextPath, "utf-8").trim();
       if (content) {
-        return trimSnapshot(`## Contexte code (context.md)\n\n${content}`);
+        if (isContextStale(contextPath, localPath)) {
+          console.warn("   ⚠️  context.md plus ancien que le dernier commit — snapshot git utilisé.");
+        } else {
+          return trimSnapshot(`## Contexte code (context.md)\n\n${content}`);
+        }
       }
     }
   }

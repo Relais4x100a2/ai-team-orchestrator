@@ -48,11 +48,15 @@ export function createSprint(
   const id = ulid();
   mkdirSync(resolve(resolveSprintsDir(projectDataDir), id), { recursive: true });
   const existing = loadSprintIndex(projectDataDir);
+  const truncatedBrief = brief.slice(0, 200);
+  if (truncatedBrief.length < brief.length) {
+    console.warn(`   ⚠️  Brief tronqué à 200 caractères (${brief.length} → 200).`);
+  }
   const entry: SprintEntry = {
     id,
     createdAt: new Date().toISOString(),
     direction,
-    brief: brief.slice(0, 200),
+    brief: truncatedBrief,
     issueCount: 0,
   };
   saveSprintIndex(projectDataDir, {

@@ -27,14 +27,8 @@ Souhaitez-vous scinder le commit 1 en deux issues, ou garder une seule issue com
     assert.equal(result.length, 2);
   });
 
-  it("fallback : extrait les paragraphes de fin se terminant par '?'", () => {
-    const text = `Analyse complète.\n\nLong contexte ici.\n\nVoulez-vous activer cette option ?\n\nAutre paragraphe sans point d'interrogation.`;
-    const result = extractOpenQuestions(text);
-    assert.ok(result.some(q => q.includes("Voulez-vous activer")));
-  });
-
-  it("fallback : ignore les paragraphes sans '?'", () => {
-    const text = `Voici un résumé.\n\nPas de question ici.\n\nConclusion finale.`;
+  it("n'extrait pas les paragraphes hors section même s'ils se terminent par '?'", () => {
+    const text = `Analyse complète.\n\nLong contexte ici.\n\nVoulez-vous activer cette option ?\n\nConclusion.`;
     assert.deepEqual(extractOpenQuestions(text), []);
   });
 });

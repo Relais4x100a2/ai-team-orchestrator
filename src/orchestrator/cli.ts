@@ -240,7 +240,7 @@ export async function main(): Promise<void> {
         console.log("═".repeat(60));
         for (const s of [...index.sprints].reverse()) {
           const active = s.id === index.activeSprint ? " ← actif" : "";
-          const date = new Date(s.createdAt).toLocaleString("fr-FR");
+          const date = new Date(s.createdAt).toLocaleString();
           console.log(`  ${s.id}${active}`);
           console.log(`    ${date} [${s.direction}] ${s.issueCount} issue(s) — ${s.brief}`);
         }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, it } from "node:test";
@@ -35,6 +35,22 @@ describe("buildCodeSnapshot", () => {
     const result = buildCodeSnapshot(tmp, dataDir);
     assert.ok(result.length <= 2100); // marge pour le label
     assert.ok(result.includes("[…tronqué]"));
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("bascule sur le snapshot git si context.md est plus vieux que le dernier commit", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "snap-"));
+    const dataDir = join(tmp, ".ai-team-orchestrator");
+    mkdirSync(dataDir, { recursive: true });
+    const contextPath = join(dataDir, "context.md");
+    writeFileSync(contextPath, "# Vieux contexte\nContenu périmé.", "utf-8");
+    // Set mtime to 30 days ago — older than any recent commit in this repo
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    utimesSync(contextPath, thirtyDaysAgo, thirtyDaysAgo);
+    // Use orchestrator repo as localPath — has a recent commit
+    const result = buildCodeSnapshot(process.cwd(), dataDir);
+    assert.ok(!result.includes("Vieux contexte"), "ne doit pas utiliser le context.md périmé");
+    assert.ok(!result.includes("Contenu périmé"), "ne doit pas utiliser le context.md périmé");
     rmSync(tmp, { recursive: true, force: true });
   });
 
