@@ -142,3 +142,23 @@ export function printBacklogSummary(session: OrchestratorSession, backlog?: Back
     console.log(`  Dernière mise à jour : ${new Date(b.lastUpdated).toLocaleString("fr-FR")}`);
   }
 }
+
+const BACKLOG_CONTEXT_MAX_CHARS = 3000;
+
+export function formatBacklogForContext(backlog: Backlog): string {
+  const openIssues = backlog.issues.filter(
+    (i) => i.status === "todo" || i.status === "in_progress",
+  );
+  if (openIssues.length === 0) return "";
+
+  const header = `## Backlog existant (${openIssues.length} issue(s) ouvertes)`;
+  const parts = openIssues.map((i) => {
+    const desc = i.description.slice(0, 200);
+    const suffix = i.description.length > 200 ? "…" : "";
+    return `### ${i.id} [${i.priority} / ${i.size}] — ${i.title}\n${i.status} | ${desc}${suffix}`;
+  });
+
+  const full = `${header}\n\n${parts.join("\n\n")}`;
+  if (full.length <= BACKLOG_CONTEXT_MAX_CHARS) return full;
+  return full.slice(0, BACKLOG_CONTEXT_MAX_CHARS) + "\n\n[…tronqué]";
+}

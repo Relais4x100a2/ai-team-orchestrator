@@ -5,10 +5,11 @@ import { describe, it } from "node:test";
 import { join, resolve } from "path";
 import { parseBacklogJson } from "../models.js";
 import type { ProjectContext } from "../models.js";
-import { loadBacklog, resolveBacklogPath } from "./backlog-io.js";
+import { formatBacklogForContext, loadBacklog, resolveBacklogPath } from "./backlog-io.js";
 import { BACKLOG_FALLBACK_PATH, LAST_RUN_BASE_DIR } from "./paths-and-env.js";
 import { emptyOrchestratorSession } from "./session.js";
 import type { OrchestratorSession } from "./session.js";
+import type { Backlog, BacklogIssue } from "../backlog.js";
 
 describe("resolveBacklogPath", () => {
   it("renvoie last-run/<slug>/backlog.json quand activeProjectSlug est défini", () => {
@@ -84,5 +85,70 @@ describe("loadBacklog migration backlogDocumentId", () => {
     const round = parseBacklogJson(JSON.parse(readFileSync(join(dataDir, "backlog.json"), "utf-8")));
     assert.equal(round.backlogDocumentId, b.backlogDocumentId);
     rmSync(localRoot, { recursive: true, force: true });
+  });
+});
+
+describe("formatBacklogForContext", () => {
+  const base: Omit<BacklogIssue, "id" | "status"> = {
+    title: "Feature A",
+    description: "Description de l'issue A.",
+    priority: "MUST",
+    size: "M",
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    completedAt: null,
+    pipelineRun: null,
+  };
+
+  it("retourne une chaîne vide si aucune issue ouverte (done/skipped uniquement)", () => {
+    const b: Backlog = {
+      version: 2,
+      lastUpdated: "",
+      backlogDocumentId: "01TEST00000000000000000000",
+      issues: [
+        { ...base, id: "BP-001", status: "done" },
+        { ...base, id: "BP-002", status: "skipped" },
+      ],
+    };
+    assert.equal(formatBacklogForContext(b), "");
+  });
+
+  it("inclut les issues todo et in_progress, exclut done et skipped", () => {
+    const b: Backlog = {
+      version: 2,
+      lastUpdated: "",
+      backlogDocumentId: "01TEST00000000000000000000",
+      issues: [
+        { ...base, id: "BP-001", status: "todo" },
+        { ...base, id: "BP-002", status: "in_progress" },
+        { ...base, id: "BP-003", status: "done" },
+        { ...base, id: "BP-004", status: "skipped" },
+      ],
+    };
+    const result = formatBacklogForContext(b);
+    assert.ok(result.includes("BP-001"));
+    assert.ok(result.includes("BP-002"));
+    assert.ok(!result.includes("BP-003"));
+    assert.ok(!result.includes("BP-004"));
+    assert.ok(result.includes("## Backlog existant (2 issue(s) ouvertes)"));
+  });
+
+  it("tronque à 3 000 caractères max avec marqueur [tronqué]", () => {
+    const longDesc = "y".repeat(500);
+    const issues: BacklogIssue[] = Array.from({ length: 20 }, (_, i) => ({
+      ...base,
+      id: `BP-${String(i + 1).padStart(3, "0")}`,
+      status: "todo" as const,
+      description: longDesc,
+    }));
+    const b: Backlog = {
+      version: 2,
+      lastUpdated: "",
+      backlogDocumentId: "01TEST00000000000000000000",
+      issues,
+    };
+    const result = formatBacklogForContext(b);
+    assert.ok(result.length <= 3100);
+    assert.ok(result.includes("[…tronqué]"));
   });
 });
