@@ -148,7 +148,7 @@ describe("formatBacklogForContext", () => {
       issues,
     };
     const result = formatBacklogForContext(b);
-    assert.ok(result.length <= 3100);
-    assert.ok(result.includes("[…tronqué]"));
+    assert.ok(result.length <= 3012, `longueur ${result.length} dépasse 3012`); // 3000 + "\n\n[…tronqué]".length
+    assert.ok(result.includes("[…tronqué]"), "doit contenir le marqueur de troncature");
   });
 });

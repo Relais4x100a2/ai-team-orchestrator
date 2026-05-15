@@ -153,8 +153,9 @@ export function formatBacklogForContext(backlog: Backlog): string {
 
   const header = `## Backlog existant (${openIssues.length} issue(s) ouvertes)`;
   const parts = openIssues.map((i) => {
-    const desc = i.description.slice(0, 200);
-    const suffix = i.description.length > 200 ? "…" : "";
+    const raw = i.description ?? "";
+    const desc = raw.slice(0, 200);
+    const suffix = raw.length > 200 ? "…" : "";
     return `### ${i.id} [${i.priority} / ${i.size}] — ${i.title}\n${i.status} | ${desc}${suffix}`;
   });
 
