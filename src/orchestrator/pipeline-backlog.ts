@@ -122,7 +122,13 @@ async function collectOpenAnswers(agentOutput: string): Promise<string> {
     return "";
   }
   console.log(`\n💬 ${questions.length} question(s) ouverte(s) de l'agent — répondre pour affiner l'étape suivante.`);
-  return promptOpenQuestions(questions);
+  const collected = await promptOpenQuestions(questions);
+  // Discard if user provided only empty answers
+  const hasContent = collected
+    .split("\n")
+    .filter((l) => l.startsWith("   → "))
+    .some((l) => l.replace("   → ", "").trim().length > 0);
+  return hasContent ? collected : "";
 }
 
 export async function pipelineBacklogReflection(
@@ -182,8 +188,8 @@ export async function pipelineBacklogReflection(
   if (parsedIssues.length === 0) {
     console.log("⚠️  Aucune issue parsée depuis la sortie PM (synthèse finale) — backlog non modifié.");
     savePmParseFailureArtifacts(session, specsFinal, {
-      architecture,
-      reflection,
+      architecture: architectureWithAnswers,
+      reflection: reflectionWithAnswers,
     });
     return;
   }
