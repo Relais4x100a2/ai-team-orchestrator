@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { Readable, PassThrough } from "node:stream";
 import { describe, it } from "node:test";
-import { extractOpenQuestions } from "./open-questions.js";
+import { extractOpenQuestions, promptOpenQuestionsWithStreams } from "./open-questions.js";
 
 describe("extractOpenQuestions", () => {
   it("retourne [] quand aucune question", () => {
@@ -38,20 +39,14 @@ Souhaitez-vous scinder le commit 1 en deux issues, ou garder une seule issue com
   });
 });
 
-import { createInterface } from "node:readline";
-import { Readable } from "node:stream";
-
-describe("promptOpenQuestions", () => {
+describe("promptOpenQuestionsWithStreams", () => {
   it("retourne une chaîne formatée avec les réponses", async () => {
-    // Simuler une entrée utilisateur via un Readable
     const fakeInput = Readable.from(["Garder une seule issue.\n"]);
-    // On ne peut pas mocker process.stdin directement — tester la logique via inject
-    // On importe la version injectable (voir implémentation ci-dessous)
-    const { promptOpenQuestionsWithStreams } = await import("./open-questions.js");
+    const fakeOutput = new PassThrough();
     const result = await promptOpenQuestionsWithStreams(
       ["Souhaitez-vous scinder le commit 1 ?"],
       fakeInput,
-      process.stdout,
+      fakeOutput,
     );
     assert.ok(result.includes("## Réponses aux questions ouvertes"));
     assert.ok(result.includes("Souhaitez-vous scinder"));
