@@ -34,6 +34,7 @@ describe("buildCodeSnapshot", () => {
     writeFileSync(join(dataDir, "context.md"), "x".repeat(5000), "utf-8");
     const result = buildCodeSnapshot(tmp, dataDir);
     assert.ok(result.length <= 2100); // marge pour le label
+    assert.ok(result.includes("[…tronqué]"));
     rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -41,7 +42,7 @@ describe("buildCodeSnapshot", () => {
     const tmp = mkdtempSync(join(tmpdir(), "snap-"));
     // Pas de repo git ici — les execFileSync doivent être silencieux
     const result = buildCodeSnapshot(tmp, undefined);
-    assert.ok(typeof result === "string");
+    assert.ok(result.length > 0);
     rmSync(tmp, { recursive: true, force: true });
   });
 });
