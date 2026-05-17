@@ -68,7 +68,10 @@ function extractSize(block: string): IssueSize {
  */
 export function parsePMOutput(pmOutput: string): ParsedIssueDraft[] {
   const issues: ParsedIssueDraft[] = [];
-  const blocks = pmOutput
+  // Normalise les apostrophes courbes (U+2018/U+2019) que les LLM émettent en français
+  // vers l'apostrophe ASCII pour que les regex "afin d'", "qu'", etc. matchent dans tous les cas.
+  const normalized = pmOutput.replace(/[‘’]/g, "'");
+  const blocks = normalized
     .split(/\n(?:---+|\*\*\*+)\n/)
     .map(b => b.trim())
     .filter(Boolean)
