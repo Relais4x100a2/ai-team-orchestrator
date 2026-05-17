@@ -189,30 +189,88 @@ export async function pipelineBacklogReflection(
     return parts.join("\n\n---\n\n");
   };
 
-  const pmTask =
+  // ── Étape 1 : PO (vision métier + signal INCLUDE_UX_UI) ──────────────────
+  const poTask =
     direction === "forward"
-      ? "À partir de cette métavision, génère/structure des user stories backlog actionnables avec priorités, tailles et critères d'acceptation."
-      : "À partir de ce feedback terrain, révise et complète le backlog en ajustant priorités, tailles et critères d'acceptation.";
-  const specs = await runAgent(session, "pm", pmTask, {
+      ? "À partir de cette métavision, produis la vision métier et les besoins priorisés avec critères d'acceptation utilisateur. Évalue si le sprint nécessite un travail UX/UI."
+      : "À partir de ce feedback terrain, identifie les ajustements de valeur métier et priorisation nécessaires. Évalue si le sprint nécessite un travail UX/UI.";
+  const poOutput = await runAgent(session, "po", poTask, {
     additionalContext: withSnapshot(brief, true),
     frugal,
-    cloud: resolveCloudMode(session, "pm"),
+    cloud: resolveCloudMode(session, "po"),
   });
 
-  const pmAnswers = await collectOpenAnswers(specs);
-  const specsWithAnswers = pmAnswers ? `${pmAnswers}\n\n---\n\n${specs}` : specs;
+  const poAnswers = await collectOpenAnswers(poOutput);
+  const poOutputWithAnswers = poAnswers ? `${poAnswers}\n\n---\n\n${poOutput}` : poOutput;
 
-  const architecture = await runArchitectForBacklogReflection(session, withSnapshot(specsWithAnswers), frugal);
+  // Parse du signal INCLUDE_UX_UI
+  const includeUxUiMatch = /INCLUDE_UX_UI:\s*(true|false)/i.exec(poOutput);
+  if (!includeUxUiMatch) {
+    console.warn("   ⚠️  Signal INCLUDE_UX_UI absent de la sortie PO — UX/UI non invoqués par défaut.");
+  }
+  const includeUxUi = includeUxUiMatch?.[1]?.toLowerCase() === "true";
+  console.log(`   🎨 UX/UI dans ce sprint : ${includeUxUi ? "oui" : "non"}`);
+
+  // ── Étape 2 : Architect + UX/UI optionnels (parallèle) ───────────────────
+  const parallelTasks: Promise<string>[] = [
+    runArchitectForBacklogReflection(session, withSnapshot(poOutputWithAnswers), frugal),
+  ];
+
+  if (includeUxUi) {
+    console.log("   🎨 Lancement UX + UI en parallèle avec Architect…");
+    parallelTasks.push(
+      runAgent(
+        session,
+        "ux",
+        "À partir de la vision PO, propose les parcours utilisateur et wireframes clés pour ce sprint.",
+        {
+          additionalContext: withSnapshot(poOutputWithAnswers),
+          frugal,
+          cloud: resolveCloudMode(session, "ux"),
+        },
+      ),
+      runAgent(
+        session,
+        "ui",
+        "À partir de la vision PO, propose les composants visuels et tokens UI nécessaires pour ce sprint.",
+        {
+          additionalContext: withSnapshot(poOutputWithAnswers),
+          frugal,
+          cloud: resolveCloudMode(session, "ui"),
+        },
+      ),
+    );
+  }
+
+  const parallelResults = await Promise.all(parallelTasks);
+  const architecture = parallelResults[0]!;
+  const uxOutput = includeUxUi ? (parallelResults[1] ?? "") : "";
+  const uiOutput = includeUxUi ? (parallelResults[2] ?? "") : "";
+
+  if (includeUxUi) {
+    if (!uxOutput) console.warn("   ⚠️  Agent UX — sortie vide, ignorée.");
+    if (!uiOutput) console.warn("   ⚠️  Agent UI — sortie vide, ignorée.");
+  }
 
   const archAnswers = await collectOpenAnswers(architecture);
   const architectureWithAnswers = archAnswers ? `${archAnswers}\n\n---\n\n${architecture}` : architecture;
+
+  // ── Étape 3 : Red Team ───────────────────────────────────────────────────
+  const uxUiContext = [
+    uxOutput ? `## Vision UX\n${uxOutput}` : "",
+    uiOutput ? `## Vision UI\n${uiOutput}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   const reflection = await runAgent(
     session,
     "redteam_reflection",
     "Challenge la cohérence produit/architecture et propose les ajustements backlog nécessaires.",
     {
-      additionalContext: withSnapshot(`## Backlog\n${specsWithAnswers}\n\n## Vision architecture\n${architectureWithAnswers}`),
+      additionalContext: withSnapshot(
+        `## Vision PO\n${poOutputWithAnswers}\n\n## Vision architecture\n${architectureWithAnswers}${uxUiContext ? `\n\n${uxUiContext}` : ""}`,
+      ),
       frugal,
       cloud: resolveCloudMode(session, "redteam_reflection"),
     },
@@ -221,14 +279,18 @@ export async function pipelineBacklogReflection(
   const reflectionAnswers = await collectOpenAnswers(reflection);
   const reflectionWithAnswers = reflectionAnswers ? `${reflectionAnswers}\n\n---\n\n${reflection}` : reflection;
 
+  // ── Étape 4 : PM synthèse finale ─────────────────────────────────────────
   const pmSynthesisTask =
-    "À partir de la vision PM initiale, des contraintes architecture et des défis red team, produis la version FINALE et révisée du backlog. Intègre les ajustements de priorité, taille et description proposés. Utilise EXACTEMENT le même format (## 🎯 User Story, ## 🏷️ Priorité, ## 📏 Taille estimée, etc.) séparé par ---.";
+    "À partir de la vision PO, des contraintes architecture, des perspectives UX/UI et des défis red team, produis la version FINALE et révisée du backlog. Intègre les ajustements de priorité, taille et description proposés. Utilise EXACTEMENT le même format (## 🎯 User Story, ## 🏷️ Priorité, ## 📏 Taille estimée, etc.) séparé par ---.";
   const specsFinal = await runAgent(session, "pm", pmSynthesisTask, {
-    additionalContext: withSnapshot(`## Backlog initial (PM)\n${specsWithAnswers}\n\n## Vision architecture\n${architectureWithAnswers}\n\n## Défis et ajustements Red Team\n${reflectionWithAnswers}`),
+    additionalContext: withSnapshot(
+      `## Vision PO\n${poOutputWithAnswers}\n\n## Vision architecture\n${architectureWithAnswers}${uxUiContext ? `\n\n${uxUiContext}` : ""}\n\n## Défis et ajustements Red Team\n${reflectionWithAnswers}`,
+    ),
     frugal,
     cloud: resolveCloudMode(session, "pm"),
   });
 
+  // ── Parse + persistance backlog ───────────────────────────────────────────
   const parsedIssues = parsePMOutput(specsFinal);
   if (parsedIssues.length === 0) {
     console.log("⚠️  Aucune issue parsée depuis la sortie PM (synthèse finale) — backlog non modifié.");
@@ -284,6 +346,15 @@ export async function pipelineBacklogReflection(
   if (session.activeProject?.projectDataDir && session.activeSprintId) {
     updateSprintIssueCount(session.activeProject.projectDataDir, session.activeSprintId, parsedIssues.length);
   }
-  console.log(`\n✅ Backlog mis à jour via pipeline backlog ${direction} (${parsedIssues.length} item(s) traités).`);
+
+  // Log final avec compte réel et nombre de titres manquants
+  const untitled = parsedIssues.filter((i) => i.title === "Issue sans titre").length;
+  const untitledNote = untitled > 0 ? `, dont ${untitled} sans titre` : "";
+  console.log(
+    `\n✅ Backlog mis à jour via pipeline backlog ${direction} (${parsedIssues.length} item(s) traités${untitledNote}).`,
+  );
+  if (untitled > 0) {
+    console.warn(`   ⚠️  ${untitled} issue(s) sans titre dans ce run — vérifier le format de sortie PM/PO.`);
+  }
   printBacklogSummary(session, backlog);
 }
