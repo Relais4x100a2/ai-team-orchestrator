@@ -104,6 +104,86 @@ L`;
     assert.strictEqual(issues[0]!.priority, "SHOULD");
     assert.strictEqual(issues[0]!.size, "L");
   });
+
+  it("extrait le titre avec 'afin d'' (apostrophe contractée)", () => {
+    const pm = `## 🎯 User Story
+
+En tant qu'utilisateur, je veux une synthèse stylométrique afin d'éviter une régression.
+
+## 🏷️ Priorité
+
+SHOULD
+
+## 📏 Taille estimée
+
+M
+`;
+    const issues = parsePMOutput(pm);
+    assert.strictEqual(issues.length, 1);
+    assert.ok(
+      issues[0]!.title.includes("synthèse stylométrique"),
+      `Titre attendu : contient "synthèse stylométrique", obtenu : "${issues[0]!.title}"`,
+    );
+  });
+
+  it("extrait le titre avec 'En tant qu'' (apostrophe)", () => {
+    const pm = `## 🎯 User Story
+
+En tant qu'admin, je veux gérer les utilisateurs afin de contrôler les accès.
+
+## 🏷️ Priorité
+
+MUST
+
+## 📏 Taille estimée
+
+L
+`;
+    const issues = parsePMOutput(pm);
+    assert.strictEqual(issues.length, 1);
+    assert.ok(
+      issues[0]!.title.includes("gérer les utilisateurs"),
+      `Titre attendu : contient "gérer les utilisateurs", obtenu : "${issues[0]!.title}"`,
+    );
+  });
+
+  it("extrait le titre depuis un heading ## non-section si h1 et user story patterns absents", () => {
+    const pm = `## 🎯 User Story
+
+Contenu sans pattern user story exploitable pour le titre.
+
+## Authentification SSO
+
+## 🏷️ Priorité
+
+MUST
+
+## 📏 Taille estimée
+
+M
+`;
+    const issues = parsePMOutput(pm);
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0]!.title, "Authentification SSO");
+  });
+
+  it("retourne 'Issue sans titre' si aucune stratégie ne trouve un titre", () => {
+    const pm = `## 🎯 User Story
+
+Contenu quelconque sans pattern exploitable pour le titre.
+
+## 🏷️ Priorité
+
+COULD
+
+## 📏 Taille estimée
+
+S
+`;
+    const issues = parsePMOutput(pm);
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0]!.title, "Issue sans titre");
+  });
 });
 
 describe("generateIssueId", () => {

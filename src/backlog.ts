@@ -79,12 +79,14 @@ export function parsePMOutput(pmOutput: string): ParsedIssueDraft[] {
     let title = h1Match ? h1Match[1].trim() : null;
 
     if (!title) {
-      const userStoryMatch = block.match(/je\s+veux\s+(.+?)\s+(?:afin|pour)\s+de/is);
+      // Gère les formes contractées : "afin d'" en plus de "afin de" / "pour de"
+      const userStoryMatch = block.match(/je\s+veux\s+(.+?)\s+(?:afin|pour)\s+(?:de|d')/is);
       title = userStoryMatch ? userStoryMatch[1].trim().split("\n")[0] : null;
     }
 
     if (!title) {
-      const enTantMatch = block.match(/\bEn\s+tant\s+que\s+[^,\n]+,\s*je\s+veux\s+(.+?)(?:\.|$)/is);
+      // Gère "En tant qu'" (apostrophe) en plus de "En tant que " (espace)
+      const enTantMatch = block.match(/\bEn\s+tant\s+qu[e']\s*[^,\n]+,\s*je\s+veux\s+(.+?)(?:\.|$)/is);
       title = enTantMatch ? enTantMatch[1].trim().split("\n")[0] : null;
     }
 
@@ -93,6 +95,23 @@ export function parsePMOutput(pmOutput: string): ParsedIssueDraft[] {
       title = asAMatch ? asAMatch[1].trim().split("\n")[0] : null;
     }
 
+    if (!title) {
+      // 5ème tentative : premier heading ## ou ### qui n'est pas une section structurelle connue
+      const KNOWN_SECTION_RE =
+        /^#{2,3}\s*(?:🎯|📋|🏷️|📐|⚠️|📏)?\s*(?:User\s+Stor(?:y|ies)|Crit[eè]res?|Priorit[eé]|Scope|Risques?|Taille)/i;
+      const altHeading = block
+        .split("\n")
+        .find((l) => /^#{2,3}\s+/.test(l) && !KNOWN_SECTION_RE.test(l));
+      if (altHeading) {
+        const candidate = altHeading.replace(/^#{2,3}\s+/, "").trim();
+        if (candidate) title = candidate;
+      }
+    }
+
+    if (!title) {
+      const preview = block.slice(0, 100).replace(/\n/g, " ");
+      console.warn(`   ⚠️  Titre non extrait pour un bloc PM/PO — aperçu : ${preview}`);
+    }
     title = title || "Issue sans titre";
 
     const priority = extractPriority(block);
