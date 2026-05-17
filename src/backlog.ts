@@ -79,24 +79,8 @@ export function parsePMOutput(pmOutput: string): ParsedIssueDraft[] {
     let title = h1Match ? h1Match[1].trim() : null;
 
     if (!title) {
-      // Gère les formes contractées : "afin d'" en plus de "afin de" / "pour de"
-      const userStoryMatch = block.match(/je\s+veux\s+(.+?)\s+(?:afin|pour)\s+(?:de|d')/is);
-      title = userStoryMatch ? userStoryMatch[1].trim().split("\n")[0] : null;
-    }
-
-    if (!title) {
-      // Gère "En tant qu'" (apostrophe) en plus de "En tant que " (espace)
-      const enTantMatch = block.match(/\bEn\s+tant\s+qu[e']\s*[^,\n]+,\s*je\s+veux\s+(.+?)(?:\.|$)/is);
-      title = enTantMatch ? enTantMatch[1].trim().split("\n")[0] : null;
-    }
-
-    if (!title) {
-      const asAMatch = block.match(/\bas\s+a\s+[^,\n]+,\s*i\s+(?:want|need)\s+(.+?)(?:\.|,|$)/is);
-      title = asAMatch ? asAMatch[1].trim().split("\n")[0] : null;
-    }
-
-    if (!title) {
-      // 5ème tentative : premier heading ## ou ### qui n'est pas une section structurelle connue
+      // Stratégie 2 : premier heading ##/### non-section — titre explicite posé par le PM/PO
+      // (prioritaire sur les patterns user story qui extraient de la prose avec marqueurs markdown)
       const KNOWN_SECTION_RE =
         /^#{2,3}\s*(?:🎯|📋|🏷️|📐|⚠️|📏)?\s*(?:User\s+Stor(?:y|ies)|Crit[eè]res?|Priorit[eé]|Scope|Risques?|Taille)/i;
       const altHeading = block
@@ -106,6 +90,28 @@ export function parsePMOutput(pmOutput: string): ParsedIssueDraft[] {
         const candidate = altHeading.replace(/^#{2,3}\s+/, "").trim();
         if (candidate) title = candidate;
       }
+    }
+
+    if (!title) {
+      // Stratégie 3 : "je veux … afin de|d'" — gère formes contractées françaises
+      const userStoryMatch = block.match(/je\s+veux\s+(.+?)\s+(?:afin|pour)\s+(?:de|d')/is);
+      title = userStoryMatch ? userStoryMatch[1].trim().split("\n")[0] : null;
+    }
+
+    if (!title) {
+      // Stratégie 4 : "En tant qu'|que … je veux"
+      const enTantMatch = block.match(/\bEn\s+tant\s+qu[e']\s*[^,\n]+,\s*je\s+veux\s+(.+?)(?:\.|$)/is);
+      title = enTantMatch ? enTantMatch[1].trim().split("\n")[0] : null;
+    }
+
+    if (!title) {
+      const asAMatch = block.match(/\bas\s+a\s+[^,\n]+,\s*i\s+(?:want|need)\s+(.+?)(?:\.|,|$)/is);
+      title = asAMatch ? asAMatch[1].trim().split("\n")[0] : null;
+    }
+
+    if (title) {
+      // Supprimer les marqueurs markdown inline (**bold**, *italic*) laissés par le PM/PO
+      title = title.replace(/\*+/g, "").replace(/\s+/g, " ").trim();
     }
 
     if (!title) {
