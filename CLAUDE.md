@@ -5,9 +5,9 @@
 Ceci est un orchestrateur d'équipe de dev IA. Il utilise le Cursor SDK
 pour piloter des agents spécialisés sur un repo GitHub cible.
 
-**Exécution ticket (`pipeline next`) :** architecte (M/L/XL) → dev ⇄ sécurité ⇄ QA (sécurité avant QA, variante A). Réflexion backlog : `--pipeline backlog` forward | backward (PM + architecte + red team réflexion).
+**Exécution ticket (`pipeline next`) :** architecte (M/L/XL) → dev ⇄ sécurité ⇄ QA (sécurité avant QA, variante A). Réflexion backlog : `--pipeline backlog` forward | backward (PO + Architect + Red Team).
 
-**Pipeline backlog (`--pipeline backlog` forward | backward) :** les champs `architectureVision` et `reflectionChallenge` persistés dans `backlog.json` sur les issues MUST/SHOULD sont **une paire unique par run**, répliée sur **tout le batch** d’issues produit par le parse de la synthèse PM — cadre transverse du run, pas un résumé par story. Le détail par ticket vit dans `description` et le brief d’exécution (`pipeline next`).
+**Pipeline backlog (`--pipeline backlog` forward | backward) :** PO (vision métier + signal INCLUDE_UX_UI) → `Promise.all([Architect, ?UX, ?UI])` → Red Team réflexion → PM (synthèse finale). Les champs `architectureVision` et `reflectionChallenge` persistés dans `backlog.json` sur les issues MUST/SHOULD sont **une paire unique par run**, répliquée sur **tout le batch** d’issues — cadre transverse du run. UX et UI sont invoqués uniquement si le PO émet `INCLUDE_UX_UI: true` (sprint avec interfaces utilisateur).
 
 **Agents hors exécution ticket (invocation manuelle)** : `ux`, `ui`, `devops`, `sre`, `release`, `techwriter`, `privacy` — même injection de contexte que les autres agents quand `--project` est utilisé.
 
@@ -35,6 +35,7 @@ pour piloter des agents spécialisés sur un repo GitHub cible.
 
 | `--role`   | `promptFile` (`src/prompts/<fichier>.md`) |
 |------------|--------------------------------------------|
+| `po`       | `product-owner`                            |
 | `pm`       | `product-manager`                          |
 | `architect`| `data-architect`                           |
 | `ux`       | `ux-designer`                              |
