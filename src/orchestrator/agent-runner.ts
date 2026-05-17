@@ -24,7 +24,7 @@ import type { OrchestratorSession } from "./session.js";
 export const AGENT_CONFIG = createAgentConfig();
 
 /** Rôles pour lesquels une sortie vide est considérée comme une erreur après tentatives et secours cloud. */
-const ROLES_REQUIRING_NON_EMPTY_OUTPUT = new Set<AgentRole>(["pm", "architect", "redteam_reflection"]);
+const ROLES_REQUIRING_NON_EMPTY_OUTPUT = new Set<AgentRole>(["po", "pm", "architect", "redteam_reflection"]);
 
 /** Rôles qui nécessitent impérativement le cloud (accès PR GitHub, push de code). */
 const ROLES_REQUIRING_CLOUD = new Set<AgentRole>(["dev", "security", "qa"]);

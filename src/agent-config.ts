@@ -49,6 +49,19 @@ function resolveModel(
 
 const AGENT_DEFINITIONS = {
   // ── Pipeline ─────────────────────────────────────────────────────────────
+  po: {
+    promptFile: "product-owner",
+    description: "Product Owner — vision métier & priorisation",
+    tier: "strong" as const,
+    defaultModel: {
+      id: "claude-sonnet-4-5",
+      params: [
+        { id: "thinking", value: "true" },
+        { id: "context",  value: "200k" },
+        { id: "effort",   value: "medium" },
+      ],
+    } satisfies ModelSelection,
+  },
   pm: {
     promptFile: "product-manager",
     description: "Product Manager — specs & backlog",
@@ -179,6 +192,7 @@ export type AgentRole = keyof typeof AGENT_DEFINITIONS;
 
 /** Clés d'environnement `MODEL_*` par rôle. */
 const PER_ROLE_ENV_KEY: Record<AgentRole, string> = {
+  po: "MODEL_PO",
   pm: "MODEL_PM",
   architect: "MODEL_ARCHITECT",
   redteam_reflection: "MODEL_REDTEAM_REFLECTION",

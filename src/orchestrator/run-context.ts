@@ -8,6 +8,7 @@ import type { OrchestratorSession } from "./session.js";
 export const LAST_RUN_CONTEXT_FILE = "run-context.json";
 
 export const ROLE_OUTPUT_FILE: Record<AgentRole, string> = {
+  po: "po.md",
   pm: "pm.md",
   architect: "architect.md",
   redteam_reflection: "redteam_reflection.md",
