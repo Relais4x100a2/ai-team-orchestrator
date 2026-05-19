@@ -102,6 +102,12 @@ export interface ProjectContext {
   projectContextPath?: string;
   /** Objectif de couverture lignes (0–100) pour les tests du dépôt cible. */
   coverageLinesPct?: number;
+  /**
+   * Branche de travail fixe pour le pipeline (ex. `ai-team/pipeline`).
+   * Si absent, une branche `backlog/<id>-<slug>` est créée par issue.
+   * Si présent et que la branche existe déjà localement, elle est simplement checkoutée.
+   */
+  workBranch?: string;
 }
 
 export interface PipelineRun {

@@ -11,7 +11,11 @@ branch: main
 # project_context: context.md
 # coverage_lines_pct (optionnel, 0–100) : cible de couverture injectée au QA
 # coverage_lines_pct: 80
+# work_branch (optionnel) : branche fixe réutilisée à chaque pipeline next (ex. ai-team/pipeline)
+# Sans ce champ, une branche backlog/<id>-<slug> est créée par issue.
+# work_branch: ai-team/pipeline
 # Avec local_path : npm run migrate:project-context copie ce corps vers context.md et ne garde que le frontmatter ici
+# Gabarit dédié (commande globale /scaffold-context) : projects/_template.context.md
 ---
 
 ## Vue d'ensemble

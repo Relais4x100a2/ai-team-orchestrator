@@ -36,6 +36,8 @@ export function getProjectBranchMismatchContext(session: OrchestratorSession):
   if (!expectedBranch) return null;
   /** Branches de travail orchestrées (`pipeline next`) : le frontmatter reste sur la branche d’intégration. */
   if (expectedBranch.startsWith("backlog/")) return null;
+  const workBranch = session.activeProject?.workBranch?.trim();
+  if (workBranch && expectedBranch === workBranch) return null;
   const activeBranch = session.activeProject.branch?.trim();
   if (!activeBranch || activeBranch === expectedBranch) return null;
 

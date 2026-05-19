@@ -118,7 +118,7 @@ tsx src/orchestrator.ts --project projects/mon-projet.md --sync-issues
 - `src/orchestrator/` — `pipelineNext`, `runAgent`, chargement projet / backlog, garde branche, sync git (`cli.ts`, `workflows.ts`, `agent-runner.ts`, …)
 - `src/orchestrator/session.ts` — Type `OrchestratorSession` + `emptyOrchestratorSession()` (`cliBacklogDocumentId`, chemins `runs/`, branche backlog) ; instance unique créée dans `cli.main()` et passée aux workflows et à `runAgent`.
 - `src/orchestrator/backlog-io.ts` — Chemins `backlog.json`, migration `backlogDocumentId`, `resolveBacklogRelativePathForSync`.
-- `src/orchestrator/backlog-work-branch.ts` — Branche Git locale `backlog/<ULID>-<slug>` au `pipeline next` si `local_path`.
+- `src/orchestrator/backlog-work-branch.ts` — Branche Git locale au `pipeline next` si `local_path` : branche fixe `work_branch` si définie dans le projet, sinon `backlog/<ULID>-<slug>` par issue.
 - `src/orchestrator/runs-cleanup.ts` — Suppression opt-in des artefacts `runs/…/<issueId>/` après clôture.
 - `src/agent-config.ts` — `AGENT_DEFINITIONS`, `promptFile`, résolution des modèles (`createAgentConfig`)
 - `src/models.ts` — Types partagés (`ProjectContext`, backlog, pipeline runs, parsing JSON)
@@ -146,6 +146,8 @@ repo: https://github.com/org/repo
 branch: main
 # optionnel — répertoire de travail pour le mode **local** (agents sans cloud) :
 # local_path: ~/code/dev/mon-repo
+# optionnel — branche fixe réutilisée à chaque pipeline next ; sans ce champ, une branche backlog/<ULID>-<slug> est créée par issue :
+# work_branch: ai-team/pipeline
 ---
 
 ## Stack technique

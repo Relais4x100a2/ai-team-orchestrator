@@ -133,6 +133,9 @@ export function loadProject(filePath: string): ProjectContext {
   if (data.coverage_lines_pct !== undefined && typeof data.coverage_lines_pct !== "number") {
     throw new Error(`Frontmatter "coverage_lines_pct" invalide dans ${displayPath} : nombre attendu.`);
   }
+  if (data.work_branch !== undefined && typeof data.work_branch !== "string") {
+    throw new Error(`Frontmatter "work_branch" invalide dans ${displayPath} : chaîne attendue.`);
+  }
 
   const coverageLinesPct = parseCoverageLinesPct(
     data.coverage_lines_pct,
@@ -186,6 +189,9 @@ export function loadProject(filePath: string): ProjectContext {
     content = fallbackBody;
   }
 
+  const workBranch =
+    typeof data.work_branch === "string" && data.work_branch.trim() ? data.work_branch.trim() : undefined;
+
   const project: ProjectContext = {
     name: typeof data.name === "string" && data.name.trim() ? data.name.trim() : "Projet sans nom",
     repo: typeof data.repo === "string" && data.repo.trim() ? data.repo.trim() : (process.env.TARGET_REPO_URL ?? "").trim(),
@@ -198,6 +204,7 @@ export function loadProject(filePath: string): ProjectContext {
     projectDataDir,
     projectContextPath,
     coverageLinesPct,
+    workBranch,
   };
   assertValidProjectContext(project, absolutePath);
   return project;

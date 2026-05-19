@@ -3,6 +3,7 @@ import { resolve } from "path";
 import type { Backlog } from "../backlog.js";
 import { themeSourceForWorkBranch } from "../backlog.js";
 import { buildGitHubTreeUrlForProject } from "../project-branch-url.js";
+import { findBlockingPaths, resolveCheckoutStashPaths, stashBlockingPaths } from "./git-checkout-guard.js";
 import { runGit } from "./git-sync.js";
 import { formatErrorMessage } from "./paths-and-env.js";
 import { LAST_RUN_CONTEXT_FILE, loadLastRunContext } from "./run-context.js";
@@ -32,7 +33,7 @@ function branchBaseName(backlog: Backlog): string {
 
 function localBranchExists(repoDir: string, shortName: string): boolean {
   try {
-    runGit(repoDir, ["rev-parse", "--verify", `refs/heads/${shortName}`]);
+    runGit(repoDir, ["rev-parse", "--verify", `refs/heads/${shortName}`], { quiet: true });
     return true;
   } catch {
     return false;
@@ -72,8 +73,75 @@ function mergeRunContextBranch(session: OrchestratorSession, branchName: string)
   writeFileSync(resolve(lastRunDir, LAST_RUN_CONTEXT_FILE), JSON.stringify(next, null, 2), "utf-8");
 }
 
+/** Met de côté les fichiers orchestrateur qui bloqueraient un checkout vers `targetBranch`. */
+function stashOrchestratorFiles(repoDir: string, targetBranch: string): void {
+  const candidates = resolveCheckoutStashPaths();
+  const blocking = findBlockingPaths(repoDir, targetBranch, candidates);
+  stashBlockingPaths(repoDir, blocking);
+}
+
+/**
+ * Checkout/crée une branche fixe (`work_branch`).
+ * Si elle existe localement : checkout direct.
+ * Sinon : créée depuis `baseBranch` et poussée en remote avec tracking.
+ */
+async function ensureFixedWorkBranch(repoDir: string, branchName: string, baseBranch: string): Promise<void> {
+  if (localBranchExists(repoDir, branchName)) {
+    stashOrchestratorFiles(repoDir, branchName);
+    try {
+      runGit(repoDir, ["checkout", branchName]);
+    } catch (e) {
+      throw new Error(
+        `Branche fixe : impossible de checkout « ${branchName} » : ${formatErrorMessage(e)}`,
+      );
+    }
+    return;
+  }
+
+  // Branche absente localement — vérifier si elle existe en remote
+  let remoteExists = false;
+  try {
+    runGit(repoDir, ["rev-parse", "--verify", `refs/remotes/origin/${branchName}`], { quiet: true });
+    remoteExists = true;
+  } catch {
+    remoteExists = false;
+  }
+
+  if (remoteExists) {
+    try {
+      runGit(repoDir, ["checkout", "-b", branchName, "--track", `origin/${branchName}`]);
+    } catch (e) {
+      throw new Error(
+        `Branche fixe : impossible de créer un suivi local de « origin/${branchName} » : ${formatErrorMessage(e)}`,
+      );
+    }
+    return;
+  }
+
+  // Créer depuis la branche de base
+  stashOrchestratorFiles(repoDir, baseBranch);
+  try {
+    runGit(repoDir, ["checkout", baseBranch]);
+  } catch (e) {
+    throw new Error(
+      `Branche fixe : impossible de checkout la branche de base « ${baseBranch} » : ${formatErrorMessage(e)}`,
+    );
+  }
+  try {
+    runGit(repoDir, ["checkout", "-b", branchName]);
+  } catch (e) {
+    throw new Error(`Branche fixe : impossible de créer « ${branchName} » : ${formatErrorMessage(e)}`);
+  }
+  try {
+    runGit(repoDir, ["push", "-u", "origin", branchName]);
+  } catch (e) {
+    console.warn(`   ⚠️  Push de la branche fixe impossible : ${formatErrorMessage(e)}`);
+  }
+}
+
 /**
  * Checkout `project.branch` puis crée et suit une branche `backlog/<documentId>-<slug>` dans `local_path`.
+ * Si `project.workBranch` est défini, réutilise cette branche fixe au lieu d'en créer une par issue.
  * No-op sans `local_path`. Met `session.backlogWorkBranch` et actualise `run-context.json` (URL arbre).
  */
 export async function ensureBacklogWorkBranch(session: OrchestratorSession, backlog: Backlog): Promise<void> {
@@ -88,7 +156,7 @@ export async function ensureBacklogWorkBranch(session: OrchestratorSession, back
 
   let isGit = false;
   try {
-    isGit = runGit(repoDir, ["rev-parse", "--is-inside-work-tree"]) === "true";
+    isGit = runGit(repoDir, ["rev-parse", "--is-inside-work-tree"], { quiet: true }) === "true";
   } catch {
     isGit = false;
   }
@@ -109,19 +177,30 @@ export async function ensureBacklogWorkBranch(session: OrchestratorSession, back
     /* fetch optionnel */
   }
 
-  try {
-    runGit(repoDir, ["checkout", baseBranch]);
-  } catch (e) {
-    throw new Error(
-      `Branche backlog : impossible de checkout la branche de base « ${baseBranch} » dans ${repoDir} : ${formatErrorMessage(e)}`,
-    );
-  }
+  const fixedBranch = session.activeProject!.workBranch?.trim();
+  const branchName = fixedBranch ?? allocateBranchName(repoDir, backlog);
 
-  const branchName = allocateBranchName(repoDir, backlog);
-  try {
-    runGit(repoDir, ["checkout", "-b", branchName]);
-  } catch (e) {
-    throw new Error(`Branche backlog : impossible de créer « ${branchName} » : ${formatErrorMessage(e)}`);
+  if (fixedBranch) {
+    await ensureFixedWorkBranch(repoDir, fixedBranch, baseBranch);
+  } else {
+    stashOrchestratorFiles(repoDir, baseBranch);
+    try {
+      runGit(repoDir, ["checkout", baseBranch]);
+    } catch (e) {
+      throw new Error(
+        `Branche backlog : impossible de checkout la branche de base « ${baseBranch} » dans ${repoDir} : ${formatErrorMessage(e)}`,
+      );
+    }
+    try {
+      runGit(repoDir, ["checkout", "-b", branchName]);
+    } catch (e) {
+      throw new Error(`Branche backlog : impossible de créer « ${branchName} » : ${formatErrorMessage(e)}`);
+    }
+    try {
+      runGit(repoDir, ["push", "-u", "origin", branchName]);
+    } catch (e) {
+      console.warn(`   ⚠️  Push de la branche backlog impossible : ${formatErrorMessage(e)}`);
+    }
   }
 
   session.backlogWorkBranch = branchName;
