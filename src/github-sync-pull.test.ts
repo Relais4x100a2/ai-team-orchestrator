@@ -177,7 +177,7 @@ describe("pullIssuesFromGitHub", () => {
 
   it("GitHub closed + backlog todo → status done", async () => {
     mockGithubIssues([
-      { number: 10, title: "Fix X", state: "closed", labels: [] },
+      { number: 10, title: "Fix X", state: "closed", labels: [], body: "01ARZ3NDEKTSV4RRFFQ69G5FAV" },
     ]);
 
     const backlog = makeBacklog({
@@ -207,7 +207,7 @@ describe("pullIssuesFromGitHub", () => {
 
   it("GitHub closed + backlog in_progress → conflit, status inchangé", async () => {
     mockGithubIssues([
-      { number: 11, title: "WIP", state: "closed", labels: [] },
+      { number: 11, title: "WIP", state: "closed", labels: [], body: "01ARZ3NDEKTSV4RRFFQ69G5FAV" },
     ]);
 
     const backlog = makeBacklog({
@@ -242,6 +242,7 @@ describe("pullIssuesFromGitHub", () => {
         title: "Label update",
         state: "open",
         labels: [{ name: "priority:should" }, { name: "size:L" }],
+        body: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
       },
     ]);
 

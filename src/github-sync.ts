@@ -45,6 +45,24 @@ function summarizeGithubErrorBody(raw: string, max = 280): string {
   return compact.length <= max ? compact : `${compact.slice(0, max - 1)}…`;
 }
 
+/**
+ * Vrai si l'issue GitHub appartient au document backlog courant (évite de relier
+ * d'anciennes issues `[issue-NNN]` d'un sprint précédent).
+ */
+export function githubIssueBelongsToBacklogDocument(
+  gh: { body?: string | null; labels: Array<{ name: string }> },
+  backlogDocumentId: string,
+): boolean {
+  const docId = backlogDocumentId.trim();
+  if (!docId) return false;
+  const body = gh.body ?? "";
+  if (body.includes(docId)) return true;
+  if (isGithubSyncBacklogDocumentLabelEnabled()) {
+    return gh.labels.some(l => l.name === `backlog:${docId}`);
+  }
+  return false;
+}
+
 export function buildGitHubIssueBody(issue: BacklogIssue, ctx: GitHubIssueBacklogContext): string {
   const lines: string[] = [
     `**Document backlog** : \`${ctx.backlogDocumentId}\``,
@@ -242,7 +260,9 @@ export async function syncBacklogToGitHub(
   const ghByIssueId = new Map<string, number>();
   for (const gh of existingGhIssues) {
     const m = gh.title.match(/^\[([^\]]+)\]/);
-    if (m) ghByIssueId.set(m[1], gh.number);
+    if (!m) continue;
+    if (!githubIssueBelongsToBacklogDocument(gh, docId)) continue;
+    ghByIssueId.set(m[1], gh.number);
   }
 
   // Relie les issues backlog dont githubIssueNumber est absent mais qui existent déjà.
@@ -295,6 +315,7 @@ export async function syncBacklogToGitHub(
 interface GitHubIssueRaw {
   number: number;
   title: string;
+  body?: string | null;
   state: "open" | "closed";
   labels: Array<{ name: string }>;
   pull_request?: unknown;
@@ -447,6 +468,11 @@ export async function pullIssuesFromGitHub(
     const local = backlogByGhNumber.get(gh.number);
 
     if (local) {
+      if (!githubIssueBelongsToBacklogDocument(gh, backlog.backlogDocumentId!.trim())) {
+        result.noChange++;
+        continue;
+      }
+
       let changed = false;
       let wasStatusClosed = false;
 

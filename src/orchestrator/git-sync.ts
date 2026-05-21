@@ -41,8 +41,12 @@ function shouldSyncRole(role: AgentRole): boolean {
   return roles.has(role);
 }
 
-export function runGit(repoDir: string, args: string[]): string {
-  return execFileSync("git", ["-C", repoDir, ...args], { encoding: "utf-8" }).trim();
+/** Passe `quiet: true` pour les appels où un échec est attendu — supprime stderr sur le terminal. */
+export function runGit(repoDir: string, args: string[], opts?: { quiet?: boolean }): string {
+  return execFileSync("git", ["-C", repoDir, ...args], {
+    encoding: "utf-8",
+    ...(opts?.quiet ? { stdio: "pipe" as const } : {}),
+  }).trim();
 }
 
 export function syncLocalGitBeforeAgent(session: OrchestratorSession, role: AgentRole): void {
@@ -52,7 +56,7 @@ export function syncLocalGitBeforeAgent(session: OrchestratorSession, role: Agen
 
   let isGitRepo = false;
   try {
-    isGitRepo = runGit(repoDir, ["rev-parse", "--is-inside-work-tree"]) === "true";
+    isGitRepo = runGit(repoDir, ["rev-parse", "--is-inside-work-tree"], { quiet: true }) === "true";
   } catch {
     isGitRepo = false;
   }
@@ -71,7 +75,7 @@ export function syncLocalGitBeforeAgent(session: OrchestratorSession, role: Agen
   runGit(repoDir, ["fetch", "--prune"]);
 
   try {
-    runGit(repoDir, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+    runGit(repoDir, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], { quiet: true });
   } catch {
     console.warn("   ⚠️  Git sync ignoré : aucune upstream branch configurée.");
     return;
