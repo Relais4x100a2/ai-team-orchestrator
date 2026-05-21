@@ -3,8 +3,6 @@ import { describe, it } from "node:test";
 import { resolveRunStatus } from "./pipeline-execution-run.js";
 
 describe("resolveRunStatus", () => {
-  const now = "2026-05-21T08:00:00.000Z";
-
   it("success when no escalation and no medium notes", () => {
     assert.equal(resolveRunStatus(false, false, false, "APPROVED"), "success");
   });
