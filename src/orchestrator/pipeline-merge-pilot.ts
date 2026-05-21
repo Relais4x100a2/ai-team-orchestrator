@@ -17,9 +17,13 @@ import type { PipelineExecutionOutcome } from "./pipeline-types.js";
 import type { OrchestratorSession } from "./session.js";
 
 function assertMergePilotVerdicts(outcome: PipelineExecutionOutcome): void {
-  if (outcome.qaEscalated || outcome.securityEscalated || outcome.mediumSecurityNotes) {
+  if (
+    outcome.qaEscalated ||
+    outcome.securityEscalated ||
+    (outcome.mediumSecurityNotes && outcome.lastSecurityVerdict !== "APPROVED")
+  ) {
     throw new Error(
-      "Pilote merge : run partiel (escalade QA/sécurité ou notes moyennes) — merge refusé.",
+      "Pilote merge : run partiel (escalade QA/sécurité ou notes moyennes non résolues) — merge refusé.",
     );
   }
   if (outcome.lastQaVerdict === "REQUEST_CHANGES") {
