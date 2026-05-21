@@ -5,6 +5,7 @@ import {
   detectSecurityVerdict,
   hasDefinitiveQAVerdict,
   hasDefinitiveSecurityVerdict,
+  type SecurityVerdict,
 } from "../pipeline-detection.js";
 import { appendPipelineRun } from "../pipeline-runs.js";
 import { checkFrugalMode } from "../spend-guard.js";
@@ -23,6 +24,17 @@ import { isPipelineArchitectCloud } from "./pipeline-github-env.js";
 import type { PipelineExecutionOutcome, RunExecutionPipelineOptions } from "./pipeline-types.js";
 import type { OrchestratorSession } from "./session.js";
 import { isGithubMergePrOnCiOkEnabled } from "../github-pr-pipeline.js";
+
+export function resolveRunStatus(
+  qaEscalated: boolean,
+  securityEscalated: boolean,
+  mediumSecurityNotes: boolean,
+  lastSecurityVerdict: SecurityVerdict | null,
+): PipelineRunStatus {
+  if (qaEscalated || securityEscalated) return "partial";
+  if (mediumSecurityNotes && lastSecurityVerdict !== "APPROVED") return "partial";
+  return "success";
+}
 
 const EXECUTION_STEP_LABEL: Record<"architect" | "dev" | "security" | "qa", string> = {
   architect: "Architect",
@@ -433,9 +445,7 @@ export async function runExecutionPipeline(
     }
 
     const skipped = (step: PipelineStep) => PIPELINE_STEPS.indexOf(step) < startIdx;
-    if (qaEscalated || securityEscalated || mediumSecurityNotes) {
-      runStatus = "partial";
-    }
+    runStatus = resolveRunStatus(qaEscalated, securityEscalated, mediumSecurityNotes, lastSecurityVerdict);
 
     console.log("\n" + "═".repeat(60));
     console.log("📊 PIPELINE TERMINÉ — Résumé");
