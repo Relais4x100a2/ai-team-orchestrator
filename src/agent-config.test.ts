@@ -30,16 +30,16 @@ describe("createAgentConfig", () => {
     const cfg = createAgentConfig({});
     assert.strictEqual(cfg.pm.model.id, "claude-sonnet-4-5");
     assert.ok(Array.isArray(cfg.pm.model.params) && cfg.pm.model.params!.length > 0);
-    assert.strictEqual(cfg.dev.model.id, "composer-2");
-    assert.strictEqual(cfg.security.model.id, "composer-2");
+    assert.strictEqual(cfg.dev.model.id, "composer-2.5");
+    assert.strictEqual(cfg.security.model.id, "composer-2.5");
     assert.ok(cfg.security.model.params?.some(p => p.id === "fast" && p.value === "false"));
   });
 
   it("MODEL_<ROLE> surcharge le modèle d'un rôle précis (sans params)", () => {
-    const cfg = createAgentConfig({ MODEL_PM: "gpt-5.5", MODEL_DEV: "composer-2" });
+    const cfg = createAgentConfig({ MODEL_PM: "gpt-5.5", MODEL_DEV: "composer-2.5" });
     assert.strictEqual(cfg.pm.model.id, "gpt-5.5");
     assert.strictEqual(cfg.pm.model.params, undefined);
-    assert.strictEqual(cfg.dev.model.id, "composer-2");
+    assert.strictEqual(cfg.dev.model.id, "composer-2.5");
     assert.strictEqual(cfg.architect.model.id, "claude-sonnet-4-5");
   });
 
@@ -48,7 +48,7 @@ describe("createAgentConfig", () => {
     assert.strictEqual(cfg.pm.model.id, "gpt-5.5");
     assert.strictEqual(cfg.architect.model.id, "gpt-5.5");
     assert.strictEqual(cfg.security.model.id, "gpt-5.5");
-    assert.strictEqual(cfg.dev.model.id, "composer-2");
+    assert.strictEqual(cfg.dev.model.id, "composer-2.5");
   });
 
   it("MODEL_FAST surcharge tous les rôles « fast » si aucun override par rôle", () => {
@@ -83,7 +83,7 @@ describe("resolveRunModel", () => {
     const pm = resolveRunModel("pm", { issueSize: "S", frugal: false, env: {} });
     assert.strictEqual(pm.id, "claude-haiku-4-5");
     const arch = resolveRunModel("architect", { issueSize: "S", frugal: false, env: {} });
-    assert.strictEqual(arch.id, "composer-2");
+    assert.strictEqual(arch.id, "composer-2.5");
     assert.ok(arch.params?.some(p => p.id === "fast" && p.value === "true"));
   });
 
@@ -93,12 +93,12 @@ describe("resolveRunModel", () => {
     assert.ok(pm.params?.some(p => p.id === "thinking" && p.value === "false"));
   });
 
-  it("security hors XL → composer-2 avec fast:false (thinking sur composer invalide pour l'API)", () => {
+  it("security hors XL → composer-2.5 avec fast:false (thinking sur composer invalide pour l'API)", () => {
     const rt = resolveRunModel("security", { issueSize: "S", frugal: false, env: {} });
-    assert.strictEqual(rt.id, "composer-2");
+    assert.strictEqual(rt.id, "composer-2.5");
     assert.ok(rt.params?.some(p => p.id === "fast" && p.value === "false"));
     const rtl = resolveRunModel("security", { issueSize: "L", frugal: false, env: {} });
-    assert.strictEqual(rtl.id, "composer-2");
+    assert.strictEqual(rtl.id, "composer-2.5");
     assert.ok(rtl.params?.some(p => p.id === "fast" && p.value === "false"));
   });
 
@@ -106,7 +106,7 @@ describe("resolveRunModel", () => {
     const arch = resolveRunModel("architect", { issueSize: "XL", frugal: false, env: {} });
     assert.strictEqual(arch.id, "claude-opus-4-7");
     const dev = resolveRunModel("dev", { issueSize: "XL", frugal: false, env: {} });
-    assert.strictEqual(dev.id, "composer-2");
+    assert.strictEqual(dev.id, "composer-2.5");
     assert.ok(dev.params?.some(p => p.id === "fast" && p.value === "false"));
     const rt = resolveRunModel("security", { issueSize: "XL", frugal: false, env: {} });
     assert.strictEqual(rt.id, "claude-sonnet-4-5");
@@ -126,9 +126,9 @@ describe("resolveRunModel", () => {
     assert.strictEqual(p.id, "claude-sonnet-4-5");
   });
 
-  it("frugal force composer-2 même avec issueSize XL", () => {
+  it("frugal force composer-2.5 même avec issueSize XL", () => {
     const arch = resolveRunModel("architect", { issueSize: "XL", frugal: true, env: {} });
-    assert.strictEqual(arch.id, "composer-2");
+    assert.strictEqual(arch.id, "composer-2.5");
     assert.ok(arch.params?.some(p => p.id === "fast" && p.value === "false"));
   });
 });

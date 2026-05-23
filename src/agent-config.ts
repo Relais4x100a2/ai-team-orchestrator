@@ -19,7 +19,7 @@ export interface ModelSelection {
 
 /** Modèle économique utilisé en mode frugal (seuil de dépenses atteint). */
 export const FRUGAL_MODEL: ModelSelection = {
-  id: "composer-2",
+  id: "composer-2.5",
   // Pricing Cursor: Composer 2 (fast:false) est moins cher au token que fast:true.
   params: [{ id: "fast", value: "false" }],
 };
@@ -42,8 +42,8 @@ function resolveModel(
 // Définitions par rôle
 //
 // Stratégie coût/qualité :
-//   - Pipeline (agents en boucle possible) : sonnet-4-6 ou composer-2 selon le besoin
-//   - Agents hors-pipeline : composer-2 par défaut (invocations manuelles ponctuelles)
+//   - Pipeline (agents en boucle possible) : sonnet-4-6 ou composer-2.5 selon le besoin
+//   - Agents hors-pipeline : composer-2.5 par défaut (invocations manuelles ponctuelles)
 //   - Thinking activé là où le raisonnement profond est nécessaire (architect)
 // ---------------------------------------------------------------------------
 
@@ -109,7 +109,7 @@ const AGENT_DEFINITIONS = {
     tier: "fast" as const,
     // Mode vitesse pour garder une bonne réactivité en implémentation.
     defaultModel: {
-      id: "composer-2",
+      id: "composer-2.5",
       params: [{ id: "fast", value: "true" }],
     } satisfies ModelSelection,
   },
@@ -119,7 +119,7 @@ const AGENT_DEFINITIONS = {
     tier: "fast" as const,
     // Mode vitesse pour limiter la latence des boucles QA.
     defaultModel: {
-      id: "composer-2",
+      id: "composer-2.5",
       params: [{ id: "fast", value: "true" }],
     } satisfies ModelSelection,
   },
@@ -127,10 +127,10 @@ const AGENT_DEFINITIONS = {
     promptFile: "security",
     description: "Sécurité — audit de sécurité",
     tier: "strong" as const,
-    // composer-2 : uniquement le param `fast` est une variante connue côté API Agents
-    // (`thinking` sur composer-2 provoque invalid_model).
+    // composer-2.5 : uniquement le param `fast` est une variante connue côté API Agents
+    // (`thinking` sur composer-2.5 provoque invalid_model).
     defaultModel: {
-      id: "composer-2",
+      id: "composer-2.5",
       params: [{ id: "fast", value: "false" }],
     } satisfies ModelSelection,
   },
@@ -219,12 +219,12 @@ const PIPELINE_ROLE_WITH_SIZE_GRID = new Set<AgentRole>([
 ]);
 
 const COMPOSER_FAST: ModelSelection = {
-  id: "composer-2",
+  id: "composer-2.5",
   params: [{ id: "fast", value: "true" }],
 };
 
 const COMPOSER_SLOW: ModelSelection = {
-  id: "composer-2",
+  id: "composer-2.5",
   params: [{ id: "fast", value: "false" }],
 };
 
